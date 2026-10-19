@@ -77,9 +77,28 @@ jobs:
           cd "$DEPLOY_PATH"
           SUDO=""
           if [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
-          $SUDO composer install --no-dev --optimize-autoloader --no-interaction
-          $SUDO php spark migrate
-          $SUDO php spark cache:clear || true
+          # The default `php` can be older than the site's PHP (Hostinger's CLI
+          # is 8.1); use the newest installed PHP >= 8.2, which composer.json needs.
+          PHP=""
+          for c in /opt/alt/php85/usr/bin/php /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php82/usr/bin/php \
+                   php8.5 php8.4 php8.3 php8.2 php85 php84 php83 php82 php; do
+            bin=$(command -v "$c" 2>/dev/null || true)
+            [ -n "$bin" ] || continue
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+          done
+          if [ -z "$PHP" ]; then echo "No PHP >= 8.2 found on the server"; exit 1; fi
+          echo "Using $PHP ($("$PHP" -r 'echo PHP_VERSION;'))"
+          COMPOSER=$(command -v composer2 || command -v composer)
+          if grep -qa '__HALT_COMPILER' "$COMPOSER"; then
+            # composer.phar: run it under the chosen PHP.
+            $SUDO "$PHP" "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction
+          else
+            # Wrapper script bound to the CLI PHP: the lock file targets the
+            # site's PHP, so skip only the PHP version check.
+            $SUDO "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php
+          fi
+          $SUDO "$PHP" spark migrate
+          $SUDO "$PHP" spark cache:clear || true
           if [ -n "$SUDO" ] || [ "$(id -u)" = 0 ]; then
             $SUDO chown -R www-data:www-data writable public/uploads
             for svc in php8.3-fpm php8.2-fpm php-fpm; do
