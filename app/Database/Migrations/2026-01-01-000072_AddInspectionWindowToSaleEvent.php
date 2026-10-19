@@ -14,11 +14,16 @@ class AddInspectionWindowToSaleEvent extends Migration
 
     public function up()
     {
-        $this->execMulti(<<<SQL
-            ALTER TABLE sale_event
-                ADD COLUMN inspection_window_start DATETIME(6) AFTER scheduled_end_at,
-                ADD COLUMN inspection_window_end DATETIME(6) AFTER inspection_window_start;
-        SQL);
+        // Added only if missing, for databases where they were added by hand.
+        $columns = [
+            'inspection_window_start' => 'DATETIME(6) AFTER scheduled_end_at',
+            'inspection_window_end' => 'DATETIME(6) AFTER inspection_window_start',
+        ];
+        foreach ($columns as $name => $definition) {
+            if (!$this->db->fieldExists($name, 'sale_event')) {
+                $this->db->query("ALTER TABLE sale_event ADD COLUMN {$name} {$definition}");
+            }
+        }
     }
 
     public function down()

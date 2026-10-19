@@ -15,13 +15,19 @@ class AddLotDetailsToListing extends Migration
 
     public function up()
     {
-        $this->execMulti(<<<SQL
-            ALTER TABLE listing
-                ADD COLUMN micro_category TEXT AFTER subcategory,
-                ADD COLUMN city VARCHAR(255) AFTER yard_location_pin,
-                ADD COLUMN state VARCHAR(255) AFTER city,
-                ADD COLUMN description TEXT AFTER title;
-        SQL);
+        // Each column is added only if missing: on some databases these
+        // were already added by hand, which made the one-statement ALTER fail.
+        $columns = [
+            'micro_category' => 'TEXT AFTER subcategory',
+            'city' => 'VARCHAR(255) AFTER yard_location_pin',
+            'state' => 'VARCHAR(255) AFTER city',
+            'description' => 'TEXT AFTER title',
+        ];
+        foreach ($columns as $name => $definition) {
+            if (!$this->db->fieldExists($name, 'listing')) {
+                $this->db->query("ALTER TABLE listing ADD COLUMN {$name} {$definition}");
+            }
+        }
     }
 
     public function down()
