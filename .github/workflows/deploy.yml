@@ -1,0 +1,95 @@
+# Deploys main to the backend server over SSH.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST     server hostname or IP
+#   DEPLOY_USER     SSH user that owns DEPLOY_PATH; passwordless sudo lets
+#                   the job also chown writable/ and reload PHP-FPM
+#   DEPLOY_SSH_KEY  private key whose public half is in that user's
+#                   ~/.ssh/authorized_keys
+#   DEPLOY_PATH     app directory on the server (the one containing spark)
+#   DEPLOY_PORT     optional, defaults to 22
+#
+# The server's .env, writable/, vendor/ and public/uploads/ are never
+# touched by the sync.
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      HEALTHCHECK_URL: https://admin.adwitix.com/public/index.php/api/v1/app/tenants
+    steps:
+      - name: Check deploy secrets
+        id: guard
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_PATH" ]; then
+            echo "::warning::Deploy secrets are not set — skipping deployment."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ready == 'true'
+
+      - name: Set up SSH
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync code
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' --exclude '.github/' \
+            --exclude '.env' --exclude 'writable/' --exclude 'vendor/' \
+            --exclude 'public/uploads/' \
+            -e "ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Install, migrate, reload
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          SUDO=""
+          if [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
+          $SUDO composer install --no-dev --optimize-autoloader --no-interaction
+          $SUDO php spark migrate
+          $SUDO php spark cache:clear || true
+          if [ -n "$SUDO" ] || [ "$(id -u)" = 0 ]; then
+            $SUDO chown -R www-data:www-data writable public/uploads
+            for svc in php8.3-fpm php8.2-fpm php-fpm; do
+              if systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
+                $SUDO systemctl reload "$svc" && break
+              fi
+            done
+          fi
+          REMOTE
+
+      - name: Health check
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTHCHECK_URL")
+          echo "GET $HEALTHCHECK_URL → $code"
+          [ "$code" = 200 ]
