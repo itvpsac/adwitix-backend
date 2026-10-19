@@ -78,15 +78,18 @@ jobs:
           SUDO=""
           if [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
           # The default `php` can be older than the site's PHP (Hostinger's CLI
-          # is 8.1); use the newest installed PHP >= 8.2, which composer.json needs.
+          # is 8.1); use the newest installed PHP >= 8.2 with intl and mbstring,
+          # which composer.json and CodeIgniter need.
           PHP=""
           for c in /opt/alt/php85/usr/bin/php /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php82/usr/bin/php \
                    php8.5 php8.4 php8.3 php8.2 php85 php84 php83 php82 php; do
             bin=$(command -v "$c" 2>/dev/null || true)
             [ -n "$bin" ] || continue
-            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+            # Must also have the extensions CodeIgniter needs (intl, mbstring).
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 && extension_loaded("intl") && extension_loaded("mbstring") ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+            echo "Skipping $bin ($("$bin" -r 'echo PHP_VERSION;' 2>/dev/null)): too old or missing intl/mbstring"
           done
-          if [ -z "$PHP" ]; then echo "No PHP >= 8.2 found on the server"; exit 1; fi
+          if [ -z "$PHP" ]; then echo "No PHP >= 8.2 with intl and mbstring found on the server"; exit 1; fi
           echo "Using $PHP ($("$PHP" -r 'echo PHP_VERSION;'))"
           COMPOSER=$(command -v composer2 || command -v composer)
           if grep -qa '__HALT_COMPILER' "$COMPOSER"; then
