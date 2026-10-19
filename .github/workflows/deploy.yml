@@ -9,8 +9,8 @@
 #   DEPLOY_PATH     app directory on the server (the one containing spark)
 #   DEPLOY_PORT     optional, defaults to 22
 #
-# The server's .env, writable/, vendor/ and public/uploads/ are never
-# touched by the sync.
+# Code reaches the server through Hostinger's Git deployment (or a git
+# fetch fallback); this job then installs dependencies and migrates.
 name: Deploy backend
 
 on:
@@ -46,9 +46,6 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
-        if: steps.guard.outputs.ready == 'true'
-
       - name: Set up SSH
         if: steps.guard.outputs.ready == 'true'
         env:
@@ -60,15 +57,27 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-      - name: Sync code
+      # Hostinger's Git deployment checks out main into DEPLOY_PATH on every
+      # push, so the code isn't copied from here (copying raced with it).
+      # Wait until the server's checkout is at this commit, pulling it
+      # ourselves if Hostinger hasn't within a few minutes.
+      - name: Wait for the server checkout
         if: steps.guard.outputs.ready == 'true'
         run: |
-          rsync -az --delete \
-            --exclude '.git/' --exclude '.github/' \
-            --exclude '.env' --exclude 'writable/' --exclude 'vendor/' \
-            --exclude 'public/uploads/' \
-            -e "ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" SHA="$GITHUB_SHA" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          for i in $(seq 1 18); do
+            head=$(git rev-parse HEAD 2>/dev/null || echo none)
+            [ "$head" = "$SHA" ] && { echo "Server is at $SHA"; exit 0; }
+            echo "Server at $head, waiting for $SHA ($i/18)…"
+            sleep 10
+          done
+          echo "Hostinger hasn't pulled $SHA; fetching it directly."
+          git fetch origin main
+          git reset --hard "$SHA"
+          REMOTE
 
       - name: Install, migrate, reload
         if: steps.guard.outputs.ready == 'true'
