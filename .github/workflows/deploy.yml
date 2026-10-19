@@ -111,6 +111,9 @@ jobs:
             # site's PHP, so skip only the PHP version check.
             $SUDO "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php
           fi
+          # One-off repair: super_admin_credential was created outside the
+          # migrator, so 069 kept failing and blocked 071+. No-op once recorded.
+          $SUDO "$PHP" spark migrate:mark-applied 2026-01-01-000069 CreateSuperAdminCredential super_admin_credential
           $SUDO "$PHP" spark migrate:status || true
           # spark exits 0 even when a migration throws, so check its output.
           if ! out=$($SUDO "$PHP" spark migrate 2>&1); then echo "$out"; exit 1; fi
