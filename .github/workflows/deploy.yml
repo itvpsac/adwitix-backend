@@ -26,17 +26,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      # Host/user/path/port may be repository secrets or variables.
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || vars.DEPLOY_PORT || '22' }}
       HEALTHCHECK_URL: https://admin.adwitix.com/public/index.php/api/v1/app/tenants
     steps:
       - name: Check deploy secrets
         id: guard
         run: |
           if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_PATH" ]; then
-            echo "::warning::Deploy secrets are not set — skipping deployment."
+            for v in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH; do [ -n "${!v}" ] || echo "::warning::$v is not set (repository secret or variable)"; done
+            echo "::warning::Deploy settings missing — skipping deployment."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -51,6 +53,7 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           install -m 700 -d ~/.ssh
+          if [ -z "$DEPLOY_SSH_KEY" ]; then echo "::error::DEPLOY_SSH_KEY secret is not set"; exit 1; fi
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
