@@ -16,6 +16,8 @@ name: Deploy backend
 on:
   push:
     branches: [main]
+    # Workflow-only changes don't need a deploy (run it by hand if wanted).
+    paths-ignore: ['.github/**']
   workflow_dispatch:
 
 concurrency:

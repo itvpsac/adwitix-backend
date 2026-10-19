@@ -1,0 +1,39 @@
+# Read-only server check, run by hand from the Actions tab. Uses the same
+# secrets as deploy.yml; changes nothing on the server.
+name: Diagnose server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - name: API health
+        run: curl -s -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Inspect server
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          echo "== deploy dir"; ls -la "$DEPLOY_PATH" 2>&1 | head -40
+          echo "== app/"; ls -la "$DEPLOY_PATH/app" 2>&1 | head -30
+          echo "== disk"; df -h "$DEPLOY_PATH" 2>&1; df -i "$DEPLOY_PATH" 2>&1
+          echo "== quota"; quota -s 2>&1 | head -10 || true
+          echo "== try mkdir"; d="$DEPLOY_PATH/.deploy-probe-$$"; mkdir "$d" && echo "mkdir ok" && rmdir "$d"
+          echo "== mount"; mount 2>/dev/null | grep -E " $(df --output=target "$DEPLOY_PATH" | tail -1) " || true
+          REMOTE
