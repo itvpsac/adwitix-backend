@@ -100,7 +100,13 @@ jobs:
             # site's PHP, so skip only the PHP version check.
             $SUDO "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php
           fi
-          $SUDO "$PHP" spark migrate
+          $SUDO "$PHP" spark migrate:status || true
+          # spark exits 0 even when a migration throws, so check its output.
+          if ! out=$($SUDO "$PHP" spark migrate 2>&1); then echo "$out"; exit 1; fi
+          echo "$out"
+          if printf '%s' "$out" | grep -q 'Exception'; then
+            echo "::warning::A database migration failed — see the output above. Later migrations did not run."
+          fi
           $SUDO "$PHP" spark cache:clear || true
           if [ -n "$SUDO" ] || [ "$(id -u)" = 0 ]; then
             $SUDO chown -R www-data:www-data writable public/uploads
