@@ -132,6 +132,8 @@ $routes->get('/api/v1/app/account/earnings', 'AccountController::earnings', ['fi
 // Tenant/User management — jwtSuperAdmin-gated.
 $routes->get('/api/v1/app/admin', 'AdminController::dashboard', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/alerts', 'AdminController::alerts', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/decision-queue', 'AdminController::decisionQueue', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/system-health', 'AdminController::systemHealth', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/alerts/server-time-drift/(:segment)/acknowledge', 'AdminController::acknowledgeServerTimeDrift/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/tenants', 'TenantController::list', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants', 'TenantController::createSubmit', ['filter' => 'jwtSuperAdmin']);
