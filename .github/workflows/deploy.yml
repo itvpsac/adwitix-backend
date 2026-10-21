@@ -168,7 +168,7 @@ jobs:
           "$PHP" spark migrate:status
 
           # Database dump before anything migrates; no migration without one.
-          BACKUP_DIR="$BASE/adwitix-backups" SKIP_MEDIA=1 BACKUP_LABEL=predeploy bash "$REL/scripts/backup.sh"
+          PHP_BIN="$PHP" BACKUP_DIR="$BASE/adwitix-backups" SKIP_MEDIA=1 BACKUP_LABEL=predeploy bash "$REL/scripts/backup.sh"
 
           # One-off repair: super_admin_credential was created outside the
           # migrator, so 069 kept failing and blocked 071+. No-op once recorded.

@@ -51,7 +51,7 @@ BACKUP_LABEL="${BACKUP_LABEL:-nightly}"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 die() { log "ERROR: $*"; exit 1; }
 
-[[ -f "$ENV_FILE" ]] || die "No .env at $ENV_FILE -- can't read DB credentials. Set ENV_FILE if it's elsewhere."
+[[ -f "$ENV_FILE" ]] || die "No .env at $ENV_FILE. Set ENV_FILE if it's elsewhere."
 
 # Pull the four DB settings straight out of .env rather than duplicating
 # them here -- if the real credentials ever rotate, this script picks
@@ -63,30 +63,43 @@ env_get() {
     { grep -E "^${key}[[:space:]]*=" "$ENV_FILE" || true; } | tail -1 | sed -E "s/^${key}[[:space:]]*=[[:space:]]*//; s/^'(.*)'$/\1/; s/^\"(.*)\"$/\1/"
 }
 
-DB_HOST="$(env_get 'database\.default\.hostname')"
-DB_NAME="$(env_get 'database\.default\.database')"
-DB_USER="$(env_get 'database\.default\.username')"
-DB_PASS="$(env_get 'database\.default\.password')"
-DB_PORT="$(env_get 'database\.default\.port')"
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-3306}"
-
-[[ -n "$DB_NAME" && -n "$DB_USER" ]] || die "Could not read database.default.database/username from $ENV_FILE"
+# Preferred: ask the app for its own connection (PHP_BIN set and spark
+# present), so this connects exactly as the site does whatever the .env
+# layout; the credentials go into an owner-only option file, never onto a
+# command line. Otherwise read them from .env.
+DUMP_CNF="$(mktemp)"
+trap 'rm -f "$DUMP_CNF"' EXIT
+if [[ -n "${PHP_BIN:-}" && -f "$APP_ROOT/spark" ]]; then
+    # spark prints a banner first; the database name is the last line.
+    DB_NAME="$("$PHP_BIN" "$APP_ROOT/spark" backup:mysql-config "$DUMP_CNF" | tail -1)"
+    DB_DESC="'$DB_NAME' (app connection)"
+else
+    DB_HOST="$(env_get 'database\.default\.hostname')"
+    DB_NAME="$(env_get 'database\.default\.database')"
+    DB_USER="$(env_get 'database\.default\.username')"
+    DB_PASS="$(env_get 'database\.default\.password')"
+    DB_PORT="$(env_get 'database\.default\.port')"
+    [[ -n "$DB_NAME" && -n "$DB_USER" ]] || die "Could not read database.default.database/username from $ENV_FILE (set PHP_BIN to use the app's own connection)"
+    printf '[client]\nhost="%s"\nport=%s\nuser="%s"\npassword="%s"\n' \
+        "${DB_HOST:-localhost}" "${DB_PORT:-3306}" "$DB_USER" "$DB_PASS" > "$DUMP_CNF"
+    DB_DESC="'$DB_NAME' on ${DB_HOST:-localhost}:${DB_PORT:-3306}"
+fi
+[[ -n "$DB_NAME" ]] || die "No database name"
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
 DB_DUMP_FILE="$BACKUP_DIR/adwitix-db-${BACKUP_LABEL}-${TIMESTAMP}.sql.gz"
-log "Backing up database '$DB_NAME' on $DB_HOST:$DB_PORT to $DB_DUMP_FILE"
+log "Backing up database $DB_DESC to $DB_DUMP_FILE"
 
-# Password via the environment, not the command line, where any other
-# process on a shared host could read it.
-MYSQL_PWD="$DB_PASS" mysqldump \
-    --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
+mysqldump --defaults-extra-file="$DUMP_CNF" \
     --single-transaction --routines --triggers --no-tablespaces "$DB_NAME" \
     | gzip > "$DB_DUMP_FILE"
 
-[[ -s "$DB_DUMP_FILE" ]] || die "Dump produced an empty file -- treating as a failed backup, not a silent no-op."
+# mysqldump ends a complete dump with this line; anything else is a
+# failed or truncated backup, not a silent no-op.
+gunzip -c "$DB_DUMP_FILE" | tail -1 | grep -q 'Dump completed' || die "Dump is incomplete -- see the error above."
+
 log "Database backup OK ($(du -h "$DB_DUMP_FILE" | cut -f1))"
 
 STORAGE_ROOT="$(env_get 'storage\.root')"
