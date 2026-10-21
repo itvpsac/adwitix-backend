@@ -1,0 +1,60 @@
+# Finds user files the database points at that are missing from storage,
+# searches the hosting account for them, and (with restore) copies the ones
+# found into storage. Run by hand from the Actions tab. Never moves,
+# overwrites or deletes anything. See app/Commands/MediaAudit.php.
+name: Media audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      restore:
+        description: Copy files found elsewhere into storage
+        type: boolean
+        default: false
+      search:
+        description: Comma-separated directories to search (default the home directory)
+        required: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ] && break
+            echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
+
+      - name: Audit
+        env:
+          RESTORE: ${{ inputs.restore }}
+          SEARCH: ${{ inputs.search }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" RESTORE="$RESTORE" SEARCH="$SEARCH" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          PHP=""
+          for c in /opt/alt/php85/usr/bin/php /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php82/usr/bin/php php; do
+            bin=$(command -v "$c" 2>/dev/null || true)
+            [ -n "$bin" ] || continue
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 && extension_loaded("intl") && extension_loaded("mbstring") ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+          done
+          [ -n "$PHP" ] || { echo "No PHP >= 8.2 with intl and mbstring found"; exit 1; }
+          args=()
+          [ -n "$SEARCH" ] && args+=(--search "$SEARCH")
+          [ "$RESTORE" = true ] && args+=(--restore)
+          "$PHP" spark media:audit ${args[@]+"${args[@]}"}
+          REMOTE
