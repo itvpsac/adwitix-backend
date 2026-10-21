@@ -34,7 +34,7 @@ jobs:
           api="https://admin.adwitix.com/public/index.php/api/v1/app/listings/$LISTING_ID"
           body=$(curl -s --max-time 20 "$api")
           echo "GET $api → $(curl -s --max-time 20 -o /dev/null -w '%{http_code}' "$api")"
-          echo "$body" | jq '{status, message, media: [.data.media[]? | {media_type, file_path, is_primary}], queued: .data.queuedMediaJobs}'
+          echo "$body" | jq '{status, message, listing_status: .data.listing.status, missing_media: .data.missingMediaCount, media: [.data.media[]? | {media_type, file_path, is_primary}], queued: .data.queuedMediaJobs}'
           for p in $(echo "$body" | jq -r '.data.media[]?.file_path'); do
             for url in "$SITE/$p" "https://admin.adwitix.com/public/$p" "https://admin.adwitix.com/$p"; do
               echo "$(curl -s --max-time 20 -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
