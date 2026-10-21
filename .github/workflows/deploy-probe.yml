@@ -1,0 +1,66 @@
+# Read-only: watches the live API through a code update to see whether
+# requests fail while the server's code folder is being replaced. Runs on
+# every push to main (the same event that makes the host re-pull the code)
+# and by hand. Changes nothing on the server.
+name: Deploy probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - name: Request the API every second for 4 minutes
+        run: |
+          url="https://admin.adwitix.com/public/index.php/api/v1/app/tenants"
+          end=$((SECONDS + 240)); ok=0; bad=0
+          while [ $SECONDS -lt $end ]; do
+            code=$(curl -s --max-time 10 -o /tmp/body -w '%{http_code}' "$url" || true)
+            if [ "$code" = 200 ]; then ok=$((ok + 1)); else
+              bad=$((bad + 1))
+              echo "$(date -u +%H:%M:%S) $code $(head -c 300 /tmp/body | tr '\n' ' ')"
+            fi
+            sleep 1
+          done
+          echo "200: $ok, other: $bad"
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ] && break
+            echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
+
+      - name: When did the server's code change
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          cd "$DEPLOY_PATH" || exit 1
+          echo "== server clock (UTC)"; date -u +%H:%M:%S
+          echo "== HEAD"; git log -1 --format='%h %s' 2>&1
+          echo "== timestamps (UTC)"
+          TZ=UTC stat -c '%y  %n' . .git .git/HEAD .git/index app vendor vendor/autoload.php \
+            vendor/composer/installed.json writable writable/logs .env 2>&1
+          echo "== writable/logs"; ls -la writable/logs 2>&1
+          for f in $(ls -t writable/logs/log-*.log 2>/dev/null | head -2); do
+            echo "-- $f"; grep -E -A3 '^(ERROR|CRITICAL|ALERT|EMERGENCY)' "$f" | tail -60
+          done
+          echo "== logs changed in the last hour under ~"
+          find "$HOME" -maxdepth 4 \( -name '*.log' -o -name 'error_log' \) -newermt '-1 hour' 2>/dev/null | head -20
+          echo "== hosting deployment files"
+          ls -la --time-style=+%H:%M:%S "$HOME" 2>&1 | head -30
+          REMOTE
