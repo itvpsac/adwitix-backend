@@ -1,23 +1,34 @@
-# Deploys main to the backend server over SSH.
+# Deploys the backend to the server over SSH, one release at a time.
 #
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   DEPLOY_HOST     server hostname or IP
-#   DEPLOY_USER     SSH user that owns DEPLOY_PATH; passwordless sudo lets
-#                   the job also chown writable/ and reload PHP-FPM
+#   DEPLOY_USER     SSH user that owns DEPLOY_PATH
 #   DEPLOY_SSH_KEY  private key whose public half is in that user's
 #                   ~/.ssh/authorized_keys
-#   DEPLOY_PATH     app directory on the server (the one containing spark)
+#   DEPLOY_PATH     the site's app path (the docroot that holds public/)
 #   DEPLOY_PORT     optional, defaults to 22
 #
-# Code reaches the server through Hostinger's Git deployment (or a git
-# fetch fallback); this job then installs dependencies and migrates.
+# Layout beside the site (BASE = two levels above DEPLOY_PATH, outside the
+# web root):
+#   BASE/adwitix-releases/<time>-<sha>  one complete copy of the app each
+#   BASE/adwitix-shared/.env            server config, shared by releases
+#   BASE/adwitix-shared/writable/       logs, cache, sessions (persist)
+#   BASE/adwitix-storage/               user uploads (app/Config/Storage.php)
+#   DEPLOY_PATH -> the live release     a symlink, switched atomically
+#
+# A release is built and migrated while the previous one keeps serving, and
+# only then does DEPLOY_PATH switch to it with a single rename, so a request
+# never sees half-copied code or a half-written vendor/. If the health check
+# fails afterwards, DEPLOY_PATH switches back.
+#
+# Hostinger's own Git deployment must be off for this site: it rewrites
+# DEPLOY_PATH in place, which is exactly what this avoids. If it runs anyway,
+# this job notices, says so, and moves the site back onto a clean release.
 name: Deploy backend
 
 on:
   push:
     branches: [main]
-    # Workflow-only changes don't need a deploy (run it by hand if wanted).
-    paths-ignore: ['.github/**']
   workflow_dispatch:
 
 concurrency:
@@ -46,7 +57,11 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "RELEASE=$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ready == 'true'
 
       - name: Set up SSH
         if: steps.guard.outputs.ready == 'true'
@@ -63,55 +78,61 @@ jobs:
             echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
           done
           [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
+          echo "SSH=ssh -i $HOME/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST" >> "$GITHUB_ENV"
 
-      # Hostinger's Git deployment checks out main into DEPLOY_PATH on every
-      # push, so the code isn't copied from here (copying raced with it).
-      # Wait until the server's checkout is at this commit, pulling it
-      # ourselves if Hostinger hasn't within a few minutes.
-      - name: Wait for the server checkout
+      - name: Upload release
+        if: steps.guard.outputs.ready == 'true'
+        run: git archive --format=tar.gz "$GITHUB_SHA" | $SSH "cat > ~/adwitix-$RELEASE.tgz"
+
+      # Everything here happens in the new release folder; the live site is
+      # untouched until the next step.
+      - name: Build release
         if: steps.guard.outputs.ready == 'true'
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            DEPLOY_PATH="$DEPLOY_PATH" SHA="$GITHUB_SHA" bash -s <<'REMOTE'
+          $SSH DEPLOY_PATH="$DEPLOY_PATH" RELEASE="$RELEASE" STORAGE_ROOT="$STORAGE_ROOT" bash -s <<'REMOTE'
           set -euo pipefail
-          cd "$DEPLOY_PATH"
-          for i in $(seq 1 18); do
-            head=$(git rev-parse HEAD 2>/dev/null || echo none)
-            [ "$head" = "$SHA" ] && { echo "Server is at $SHA"; exit 0; }
-            echo "Server at $head, waiting for $SHA ($i/18)…"
-            sleep 10
-          done
-          echo "Hostinger hasn't pulled $SHA; fetching it directly."
-          git fetch origin main
-          git reset --hard "$SHA"
-          REMOTE
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          REL="$BASE/adwitix-releases/$RELEASE"
+          SHARED="$BASE/adwitix-shared"
+          mkdir -p "$REL" "$SHARED/writable"
+          tar -xzf ~/"adwitix-$RELEASE.tgz" -C "$REL"
+          rm -f ~/"adwitix-$RELEASE.tgz"
 
-      - name: Install, migrate, reload
-        if: steps.guard.outputs.ready == 'true'
-        run: |
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            DEPLOY_PATH="$DEPLOY_PATH" STORAGE_ROOT="$STORAGE_ROOT" bash -s <<'REMOTE'
-          set -euo pipefail
-          cd "$DEPLOY_PATH"
-          SUDO=""
-          if [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
-          # Persistent storage for user files, outside the code folder that
-          # Hostinger's Git deployment replaces (see app/Config/Storage.php).
-          # Default: <DEPLOY_PATH>/../../adwitix-storage, i.e. beside
-          # public_html, so it is neither deployed over nor web-accessible.
-          STORAGE_ROOT="${STORAGE_ROOT:-$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-storage}"
+          # The live app folder: the current release, or (before the first
+          # release) the folder Hostinger's Git deployment kept in place.
+          LIVE=$(readlink -f "$DEPLOY_PATH")
+          if [ ! -L "$DEPLOY_PATH" ] && [ -f "$SHARED/.env" ]; then
+            echo "::error::$DEPLOY_PATH was replaced by a plain folder — Hostinger's Git auto-deployment is still on. Turn it off in hPanel → Git; this deploy moves the site back onto a release."
+          elif [ -d "$DEPLOY_PATH/.git" ] && [ -L "$DEPLOY_PATH" ]; then
+            echo "::error::Something wrote a Git checkout into the live release — Hostinger's Git auto-deployment is still on. Turn it off in hPanel → Git."
+          fi
+
+          # Shared config and runtime files.
+          if [ ! -f "$SHARED/.env" ]; then
+            cp "$LIVE/.env" "$SHARED/.env"
+            chmod 600 "$SHARED/.env"
+            echo "Moved server config to $SHARED/.env"
+          fi
+          cp -an "$REL/writable/." "$SHARED/writable/"
+          mkdir -p "$SHARED/writable/"{cache,debugbar,logs,session,uploads,uploads_staging}
+          rm -rf "$REL/writable"
+          ln -s "$SHARED/writable" "$REL/writable"
+          ln -s "$SHARED/.env" "$REL/.env"
+
+          # Persistent storage for user files (see app/Config/Storage.php).
+          STORAGE_ROOT="${STORAGE_ROOT:-$BASE/adwitix-storage}"
           mkdir -p "$STORAGE_ROOT/uploads" "$STORAGE_ROOT/uploads_staging" "$STORAGE_ROOT/kyc_vault"
           # Adopt files still in the old in-tree locations (e.g. restored from
-          # a backup). Never overwrites, never deletes.
+          # a backup into the live folder). Never overwrites, never deletes.
           for pair in "public/uploads:uploads" "writable/uploads_staging:uploads_staging" "writable/kyc_vault:kyc_vault"; do
-            src="$DEPLOY_PATH/${pair%%:*}"; dst="$STORAGE_ROOT/${pair##*:}"
-            if [ -d "$src" ]; then cp -an "$src/." "$dst/"; fi
+            src="$LIVE/${pair%%:*}"; dst="$STORAGE_ROOT/${pair##*:}"
+            if [ -d "$src" ] && [ ! -L "$src" ]; then cp -an "$src/." "$dst/"; fi
           done
           chmod 700 "$STORAGE_ROOT/kyc_vault"
-          if grep -q '^storage\.root' .env; then
-            sed -i "s|^storage\.root.*|storage.root = $STORAGE_ROOT|" .env
+          if grep -q '^storage\.root' "$SHARED/.env"; then
+            sed -i "s|^storage\.root.*|storage.root = $STORAGE_ROOT|" "$SHARED/.env"
           else
-            printf '\nstorage.root = %s\n' "$STORAGE_ROOT" >> .env
+            printf '\nstorage.root = %s\n' "$STORAGE_ROOT" >> "$SHARED/.env"
           fi
           echo "User files: $STORAGE_ROOT ($(find "$STORAGE_ROOT/uploads" -type f | wc -l) public, $(find "$STORAGE_ROOT/kyc_vault" -type f | wc -l) KYC)"
 
@@ -123,45 +144,113 @@ jobs:
                    php8.5 php8.4 php8.3 php8.2 php85 php84 php83 php82 php; do
             bin=$(command -v "$c" 2>/dev/null || true)
             [ -n "$bin" ] || continue
-            # Must also have the extensions CodeIgniter needs (intl, mbstring).
             if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 && extension_loaded("intl") && extension_loaded("mbstring") ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
             echo "Skipping $bin ($("$bin" -r 'echo PHP_VERSION;' 2>/dev/null)): too old or missing intl/mbstring"
           done
           if [ -z "$PHP" ]; then echo "No PHP >= 8.2 with intl and mbstring found on the server"; exit 1; fi
           echo "Using $PHP ($("$PHP" -r 'echo PHP_VERSION;'))"
+
+          cd "$REL"
           COMPOSER=$(command -v composer2 || command -v composer)
           if grep -qa '__HALT_COMPILER' "$COMPOSER"; then
             # composer.phar: run it under the chosen PHP.
-            $SUDO "$PHP" "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction
+            "$PHP" "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction
           else
             # Wrapper script bound to the CLI PHP: the lock file targets the
             # site's PHP, so skip only the PHP version check.
-            $SUDO "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php
+            "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php
           fi
+
+          # Boots the framework, reads .env and reaches the database: a
+          # release that can't do this never goes live.
+          "$PHP" spark migrate:status
+
           # One-off repair: super_admin_credential was created outside the
           # migrator, so 069 kept failing and blocked 071+. No-op once recorded.
-          $SUDO "$PHP" spark migrate:mark-applied 2026-01-01-000069 CreateSuperAdminCredential super_admin_credential
-          $SUDO "$PHP" spark migrate:status || true
+          "$PHP" spark migrate:mark-applied 2026-01-01-000069 CreateSuperAdminCredential super_admin_credential
           # spark exits 0 even when a migration throws, so check its output.
-          if ! out=$($SUDO "$PHP" spark migrate 2>&1); then echo "$out"; exit 1; fi
+          out=$("$PHP" spark migrate 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
           if printf '%s' "$out" | grep -q 'Exception'; then
-            echo "::warning::A database migration failed — see the output above. Later migrations did not run."
+            echo "::error::A database migration failed — see the output above. The site stays on the previous release."
+            exit 1
           fi
-          $SUDO "$PHP" spark cache:clear || true
-          if [ -n "$SUDO" ] || [ "$(id -u)" = 0 ]; then
-            $SUDO chown -R www-data:www-data writable public/uploads
-            for svc in php8.3-fpm php8.2-fpm php-fpm; do
-              if systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-                $SUDO systemctl reload "$svc" && break
-              fi
+          "$PHP" spark cache:clear || true
+          REMOTE
+
+      - name: Switch to the new release
+        id: switch
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          $SSH DEPLOY_PATH="$DEPLOY_PATH" RELEASE="$RELEASE" bash -s <<'REMOTE'
+          set -euo pipefail
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          REL="$BASE/adwitix-releases/$RELEASE"
+          if [ -L "$DEPLOY_PATH" ]; then
+            readlink "$DEPLOY_PATH" > "$BASE/adwitix-releases/.previous"
+          else
+            # First release (or the host rewrote the folder). Let a Git
+            # deployment still writing into it finish first (up to 3 min).
+            for i in $(seq 1 18); do
+              [ -z "$(find "$DEPLOY_PATH" -maxdepth 2 -newermt '-30 seconds' -print -quit)" ] && break
+              echo "The app folder changed in the last 30s; waiting ($i/18)…"; sleep 10
             done
+            # Keep the old folder beside the releases so a rollback can
+            # restore it.
+            old="$BASE/adwitix-releases/folder-$(date -u +%Y%m%d%H%M%S)-$$"
+            mv "$DEPLOY_PATH" "$old"
+            echo "$old" > "$BASE/adwitix-releases/.previous"
+            echo "Moved the old app folder to $old"
           fi
+          # A rename over the symlink is atomic: every request sees either
+          # the old release or the new one.
+          ln -sfn "$REL" "$DEPLOY_PATH.next"
+          mv -T "$DEPLOY_PATH.next" "$DEPLOY_PATH"
+          echo "Live: $REL"
           REMOTE
 
       - name: Health check
         if: steps.guard.outputs.ready == 'true'
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTHCHECK_URL")
-          echo "GET $HEALTHCHECK_URL → $code"
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTHCHECK_URL" || true)
+            echo "GET $HEALTHCHECK_URL → $code"
+            [ "$code" = 200 ] && break
+            sleep 5
+          done
           [ "$code" = 200 ]
+          env_code=$(curl -s -o /dev/null -w '%{http_code}' https://admin.adwitix.com/.env || true)
+          if [ "$env_code" = 200 ]; then echo "::warning::https://admin.adwitix.com/.env is publicly readable"; fi
+
+      - name: Roll back
+        if: failure() && steps.switch.outcome == 'success'
+        run: |
+          $SSH DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          set -euo pipefail
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          prev=$(cat "$BASE/adwitix-releases/.previous")
+          if [[ "$(basename "$prev")" == folder-* ]]; then
+            # The previous site was a plain folder: put the folder itself
+            # back, in case serving through a symlink is what failed.
+            rm -f "$DEPLOY_PATH"
+            mv "$prev" "$DEPLOY_PATH"
+          else
+            ln -sfn "$prev" "$DEPLOY_PATH.next"
+            mv -T "$DEPLOY_PATH.next" "$DEPLOY_PATH"
+          fi
+          echo "Rolled back to $prev"
+          REMOTE
+
+      - name: Remove old releases
+        if: success()
+        run: |
+          $SSH DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          set -eu
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          cd "$BASE/adwitix-releases"
+          live=$(basename "$(readlink "$DEPLOY_PATH")")
+          # Keep the five newest releases and the two newest old folders.
+          { ls -1d 2*-* 2>/dev/null || true; } | sort -r | tail -n +6 | { grep -vx "$live" || true; } | xargs -r rm -rf
+          { ls -1d folder-* 2>/dev/null || true; } | sort -r | tail -n +3 | xargs -r rm -rf
+          echo "Releases kept: $(ls -1d 2*-* | wc -l)"
+          REMOTE
