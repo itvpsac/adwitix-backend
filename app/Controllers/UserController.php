@@ -24,9 +24,16 @@ class UserController extends BaseController
                 ->orLike('org_gstin', $q)
                 ->groupEnd();
         }
-        $users = $builder->findAll(100);
+        // ?page (1-based) and ?per_page (≤ 100).
+        $perPage = max(1, min(100, (int) ($this->request->getGet('per_page') ?: 100)));
+        $page = max(1, (int) ($this->request->getGet('page') ?: 1));
+        $total = $builder->countAllResults(false);
+        $users = $builder->findAll($perPage, ($page - 1) * $perPage);
 
-        return $this->apiResponse(['users' => $users, 'q' => $q]);
+        return $this->apiResponse([
+            'users' => $users, 'q' => $q,
+            'total' => $total, 'page' => $page, 'perPage' => $perPage, 'totalPages' => (int) ceil($total / $perPage),
+        ]);
     }
 
     public function detail(string $partyId)

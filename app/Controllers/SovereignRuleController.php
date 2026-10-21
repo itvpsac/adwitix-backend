@@ -34,6 +34,12 @@ class SovereignRuleController extends BaseController
     public function editSubmit(string $ruleId)
     {
         $numericValue = $this->input('numeric_value');
+        // A built-in rule (one the code reads by rule_key) always needs its
+        // value; clearing it would silently switch the rule off.
+        $existing = $this->rules->find($ruleId);
+        if ($existing && !empty($existing['rule_key']) && ($numericValue === null || $numericValue === '')) {
+            return $this->jsonError(422, 'value_required', 'This built-in rule needs a numeric value.');
+        }
         try {
             $this->rules->update(
                 $ruleId,
