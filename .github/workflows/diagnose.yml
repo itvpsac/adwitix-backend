@@ -23,7 +23,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
     steps:
       - name: API health
-        run: curl -s -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
+        run: curl -s --max-time 20 -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
 
       - name: Listing media
         if: inputs.listing_id != ''
@@ -32,12 +32,12 @@ jobs:
           SITE: ${{ inputs.site }}
         run: |
           api="https://admin.adwitix.com/public/index.php/api/v1/app/listings/$LISTING_ID"
-          body=$(curl -s "$api")
-          echo "GET $api → $(curl -s -o /dev/null -w '%{http_code}' "$api")"
+          body=$(curl -s --max-time 20 "$api")
+          echo "GET $api → $(curl -s --max-time 20 -o /dev/null -w '%{http_code}' "$api")"
           echo "$body" | jq '{status, message, media: [.data.media[]? | {media_type, file_path, is_primary}], queued: .data.queuedMediaJobs}'
           for p in $(echo "$body" | jq -r '.data.media[]?.file_path'); do
             for url in "$SITE/$p" "https://admin.adwitix.com/public/$p" "https://admin.adwitix.com/$p"; do
-              echo "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
+              echo "$(curl -s --max-time 20 -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
             done
           done
 
