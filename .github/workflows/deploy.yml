@@ -21,9 +21,10 @@
 # never sees half-copied code or a half-written vendor/. If the health check
 # fails afterwards, DEPLOY_PATH switches back.
 #
-# Hostinger's own Git deployment must be off for this site: it rewrites
-# DEPLOY_PATH in place, which is exactly what this avoids. If it runs anyway,
-# this job notices, says so, and moves the site back onto a clean release.
+# Hostinger's own Git deployment is disconnected from this repository (its
+# GitHub App no longer has access) and must stay off: it rewrites DEPLOY_PATH
+# in place, which is exactly what this avoids. If it runs anyway, this job
+# notices, says so, and moves the site back onto a clean release.
 name: Deploy backend
 
 on:
