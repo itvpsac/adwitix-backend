@@ -42,7 +42,15 @@ jobs:
             DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
           set -euo pipefail
           BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
-          BACKUP_DIR="$BASE/adwitix-backups" bash "$DEPLOY_PATH/scripts/backup.sh"
+          # The newest PHP >= 8.2 with intl/mbstring, as the deploy uses.
+          PHP=""
+          for c in /opt/alt/php85/usr/bin/php /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php82/usr/bin/php php; do
+            bin=$(command -v "$c" 2>/dev/null || true)
+            [ -n "$bin" ] || continue
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 && extension_loaded("intl") && extension_loaded("mbstring") ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+          done
+          [ -n "$PHP" ] || { echo "No PHP >= 8.2 with intl and mbstring found"; exit 1; }
+          PHP_BIN="$PHP" BACKUP_DIR="$BASE/adwitix-backups" bash "$DEPLOY_PATH/scripts/backup.sh"
           echo "== backups on the server"
           ls -lh "$BASE/adwitix-backups" | tail -n +2
           du -sh "$BASE/adwitix-backups"
