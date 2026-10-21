@@ -82,8 +82,8 @@ class MediaService
         // Staged OUTSIDE the public webroot — these are raw, unprocessed
         // uploads (not yet compressed/scanned), never meant to be
         // directly served until processJob() produces the real,
-        // compressed file under public/uploads/listings/.
-        $stagingDir = WRITEPATH . 'uploads_staging/' . $listingId;
+        // compressed file under the public uploads storage (StoragePaths).
+        $stagingDir = StoragePaths::stagingDir() . '/' . $listingId;
         if (!is_dir($stagingDir)) {
             mkdir($stagingDir, 0755, true);
         }
@@ -142,10 +142,7 @@ class MediaService
         $isImage = in_array($mimeType, self::ALLOWED_IMAGE_MIME_TYPES, true);
         $isVideo = in_array($mimeType, self::ALLOWED_VIDEO_MIME_TYPES, true);
 
-        $uploadDir = WRITEPATH . '../public/uploads/listings/' . $listingId;
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0755, true);
-        }
+        $uploadDir = dirname(StoragePaths::publicPathForWrite("uploads/listings/{$listingId}/.keep"));
 
         $mediaData = [
             'listing_id' => $listingId,

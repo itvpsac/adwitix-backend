@@ -33,6 +33,8 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER || vars.DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || vars.DEPLOY_PORT || '22' }}
+      # Optional override for the persistent user-file directory.
+      STORAGE_ROOT: ${{ vars.STORAGE_ROOT }}
       HEALTHCHECK_URL: https://admin.adwitix.com/public/index.php/api/v1/app/tenants
     steps:
       - name: Check deploy secrets
@@ -83,11 +85,31 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         run: |
           ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+            DEPLOY_PATH="$DEPLOY_PATH" STORAGE_ROOT="$STORAGE_ROOT" bash -s <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_PATH"
           SUDO=""
           if [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
+          # Persistent storage for user files, outside the code folder that
+          # Hostinger's Git deployment replaces (see app/Config/Storage.php).
+          # Default: <DEPLOY_PATH>/../../adwitix-storage, i.e. beside
+          # public_html, so it is neither deployed over nor web-accessible.
+          STORAGE_ROOT="${STORAGE_ROOT:-$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-storage}"
+          mkdir -p "$STORAGE_ROOT/uploads" "$STORAGE_ROOT/uploads_staging" "$STORAGE_ROOT/kyc_vault"
+          # Adopt files still in the old in-tree locations (e.g. restored from
+          # a backup). Never overwrites, never deletes.
+          for pair in "public/uploads:uploads" "writable/uploads_staging:uploads_staging" "writable/kyc_vault:kyc_vault"; do
+            src="$DEPLOY_PATH/${pair%%:*}"; dst="$STORAGE_ROOT/${pair##*:}"
+            if [ -d "$src" ]; then cp -an "$src/." "$dst/"; fi
+          done
+          chmod 700 "$STORAGE_ROOT/kyc_vault"
+          if grep -q '^storage\.root' .env; then
+            sed -i "s|^storage\.root.*|storage.root = $STORAGE_ROOT|" .env
+          else
+            printf '\nstorage.root = %s\n' "$STORAGE_ROOT" >> .env
+          fi
+          echo "User files: $STORAGE_ROOT ($(find "$STORAGE_ROOT/uploads" -type f | wc -l) public, $(find "$STORAGE_ROOT/kyc_vault" -type f | wc -l) KYC)"
+
           # The default `php` can be older than the site's PHP (Hostinger's CLI
           # is 8.1); use the newest installed PHP >= 8.2 with intl and mbstring,
           # which composer.json and CodeIgniter need.

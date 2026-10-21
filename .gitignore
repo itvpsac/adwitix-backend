@@ -1,0 +1,19 @@
+# Server configuration and installed dependencies.
+.env
+/vendor/
+
+# Runtime data, never part of a code update. The placeholder files that
+# keep these directories in the repo stay tracked.
+/writable/cache/*
+/writable/debugbar/*
+/writable/logs/*
+/writable/session/*
+/writable/uploads/*
+/writable/uploads_staging/*
+/writable/kyc_vault/
+!/writable/*/index.html
+!/writable/*/.htaccess
+
+# User uploads (served from persistent storage; see app/Config/Storage.php).
+/public/uploads/*
+!/public/uploads/.gitkeep

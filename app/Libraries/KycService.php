@@ -159,7 +159,7 @@ class KycService
         $plaintext = file_get_contents($file->getTempName());
         $ciphertext = service('encrypter')->encrypt($plaintext);
 
-        $vaultDir = WRITEPATH . 'kyc_vault/' . $partyId;
+        $vaultDir = StoragePaths::kycVaultDir() . '/' . $partyId;
         if (!is_dir($vaultDir)) {
             mkdir($vaultDir, 0700, true);
         }
@@ -185,7 +185,11 @@ class KycService
         if (!$doc) {
             throw new \RuntimeException('Document not found.');
         }
-        $ciphertext = file_get_contents($doc['encrypted_path']);
+        $path = StoragePaths::findKycFile($doc['encrypted_path']);
+        if ($path === null) {
+            throw new \RuntimeException('Document file is missing from storage.');
+        }
+        $ciphertext = file_get_contents($path);
         $plaintext = service('encrypter')->decrypt($ciphertext);
         return ['mimeType' => $doc['mime_type'], 'filename' => $doc['original_filename'], 'contents' => $plaintext];
     }

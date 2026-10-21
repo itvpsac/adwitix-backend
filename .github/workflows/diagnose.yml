@@ -58,6 +58,9 @@ jobs:
             DEPLOY_PATH="$DEPLOY_PATH" LISTING_ID="$LISTING_ID" bash -s <<'REMOTE'
           echo "== deploy dir"; ls -la "$DEPLOY_PATH" 2>&1 | head -40
           echo "== app/"; ls -la "$DEPLOY_PATH/app" 2>&1 | head -30
+          echo "== storage"; root=$(grep '^storage\.root' "$DEPLOY_PATH/.env" | sed 's/^[^=]*= *//'); echo "storage.root = ${root:-<unset>}"
+          [ -n "$root" ] && { ls -la "$root" 2>&1; echo "public files: $(find "$root/uploads" -type f 2>/dev/null | wc -l), KYC files: $(find "$root/kyc_vault" -type f 2>/dev/null | wc -l)"; }
+          [ -n "$root" ] && [ -n "$LISTING_ID" ] && ls -la "$root/uploads/listings/$LISTING_ID" 2>&1 | head -20
           echo "== public/uploads/listings"; ls "$DEPLOY_PATH/public/uploads/listings" 2>&1 | head -20
           [ -n "$LISTING_ID" ] && { echo "== files for $LISTING_ID"; ls -la "$DEPLOY_PATH/public/uploads/listings/$LISTING_ID" 2>&1 | head -20; }
           echo "== public/.htaccess"; cat "$DEPLOY_PATH/public/.htaccess" 2>&1 | head -40
