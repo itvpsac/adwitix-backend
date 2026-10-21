@@ -14,6 +14,7 @@
 #   BASE/adwitix-shared/.env            server config, shared by releases
 #   BASE/adwitix-shared/writable/       logs, cache, sessions (persist)
 #   BASE/adwitix-storage/               user uploads (app/Config/Storage.php)
+#   BASE/adwitix-backups/               database dumps + file archives (backup.yml)
 #   DEPLOY_PATH -> the live release     a symlink, switched atomically
 #
 # A release is built and migrated while the previous one keeps serving, and
@@ -165,6 +166,9 @@ jobs:
           # Boots the framework, reads .env and reaches the database: a
           # release that can't do this never goes live.
           "$PHP" spark migrate:status
+
+          # Database dump before anything migrates; no migration without one.
+          BACKUP_DIR="$BASE/adwitix-backups" SKIP_MEDIA=1 BACKUP_LABEL=predeploy bash "$REL/scripts/backup.sh"
 
           # One-off repair: super_admin_credential was created outside the
           # migrator, so 069 kept failing and blocked 071+. No-op once recorded.
