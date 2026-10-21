@@ -4,6 +4,14 @@ name: Diagnose server
 
 on:
   workflow_dispatch:
+    inputs:
+      listing_id:
+        description: Listing id whose media URLs to check (optional)
+        required: false
+      site:
+        description: Frontend origin used for the proxied URLs
+        required: false
+        default: https://adwitix.vercel.app
 
 jobs:
   diagnose:
@@ -17,6 +25,22 @@ jobs:
       - name: API health
         run: curl -s -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
 
+      - name: Listing media
+        if: inputs.listing_id != ''
+        env:
+          LISTING_ID: ${{ inputs.listing_id }}
+          SITE: ${{ inputs.site }}
+        run: |
+          api="https://admin.adwitix.com/public/index.php/api/v1/app/listings/$LISTING_ID"
+          body=$(curl -s "$api")
+          echo "GET $api → $(curl -s -o /dev/null -w '%{http_code}' "$api")"
+          echo "$body" | jq '{status, message, media: [.data.media[]? | {media_type, file_path, is_primary}], queued: .data.queuedMediaJobs}'
+          for p in $(echo "$body" | jq -r '.data.media[]?.file_path'); do
+            for url in "$SITE/$p" "https://admin.adwitix.com/public/$p" "https://admin.adwitix.com/$p"; do
+              echo "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
+            done
+          done
+
       - name: Set up SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -27,11 +51,17 @@ jobs:
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Inspect server
+        env:
+          LISTING_ID: ${{ inputs.listing_id }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+            DEPLOY_PATH="$DEPLOY_PATH" LISTING_ID="$LISTING_ID" bash -s <<'REMOTE'
           echo "== deploy dir"; ls -la "$DEPLOY_PATH" 2>&1 | head -40
           echo "== app/"; ls -la "$DEPLOY_PATH/app" 2>&1 | head -30
+          echo "== public/uploads/listings"; ls "$DEPLOY_PATH/public/uploads/listings" 2>&1 | head -20
+          [ -n "$LISTING_ID" ] && { echo "== files for $LISTING_ID"; ls -la "$DEPLOY_PATH/public/uploads/listings/$LISTING_ID" 2>&1 | head -20; }
+          echo "== public/.htaccess"; cat "$DEPLOY_PATH/public/.htaccess" 2>&1 | head -40
+          echo "== docroot .htaccess"; cat "$DEPLOY_PATH/.htaccess" 2>&1 | head -40
           echo "== disk"; df -h "$DEPLOY_PATH" 2>&1; df -i "$DEPLOY_PATH" 2>&1
           echo "== quota"; quota -s 2>&1 | head -10 || true
           echo "== try mkdir"; d="$DEPLOY_PATH/.deploy-probe-$$"; mkdir "$d" && echo "mkdir ok" && rmdir "$d"
