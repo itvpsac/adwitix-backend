@@ -48,7 +48,12 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          # Retry: the host occasionally doesn't answer the first scan.
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ] && break
+            echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
 
       - name: Inspect server
         env:
