@@ -62,7 +62,30 @@ class TenantController extends BaseController
         if (!$tenant) {
             return $this->jsonError(404, 'not_found', 'Tenant not found.');
         }
-        return $this->apiResponse(['tenant' => $tenant]);
+        $db = \Config\Database::connect();
+        $lotCount = fn(string $status) => $db->table('listing')->where('tenant_id', $tenantId)->where('status', $status)->where('archived_at', null)->countAllResults();
+        $viaSaleEvent = fn(string $table, string $alias) => $db->table("{$table} {$alias}")
+            ->join('sale_event se', "se.id = {$alias}.sale_event_id")->join('listing l', 'l.id = se.listing_id')->where('l.tenant_id', $tenantId);
+        $settled = $viaSaleEvent('settlement', 's')->selectSum('s.final_price', 'total')
+            ->where('s.status', 'completed')->where('s.completed_at >=', date('Y-m-d H:i:s', strtotime('-30 days')))->get()->getRow();
+
+        // Custodian Console › TradeSphereX: headline numbers and admins.
+        $stats = [
+            'liveLots' => $lotCount('active'),
+            'upcomingLots' => $lotCount('upcoming'),
+            'pendingLots' => $lotCount('pending_approval'),
+            'approvedSellers' => $db->table('seller_application')->where('tenant_id', $tenantId)->where('status', 'approved')->countAllResults(),
+            'pendingSellers' => $db->table('seller_application')->where('tenant_id', $tenantId)->where('status', 'pending')->countAllResults(),
+            'openDisputes' => $viaSaleEvent('dispute', 'd')->whereIn('d.status', ['filed', 'evidence_window', 'appealed'])->countAllResults(),
+            'stalledSettlements' => $viaSaleEvent('settlement', 's')->where('s.status', 'stalled')->countAllResults(),
+            'settled30d' => (float) ($settled->total ?? 0),
+        ];
+        $admins = $db->table('party_role r')->select('p.id, p.full_name, p.mobile_number, r.granted_at')
+            ->join('party p', 'p.id = r.party_id')
+            ->where('r.tenant_id', $tenantId)->where('r.role', 'tenant_admin')->where('r.revoked_at', null)
+            ->orderBy('r.granted_at', 'ASC')->get()->getResultArray();
+
+        return $this->apiResponse(['tenant' => $tenant, 'stats' => $stats, 'admins' => $admins]);
     }
 
     // BR-06: tenant branding (logo + primary color). jwtSuperAdmin-gated.
