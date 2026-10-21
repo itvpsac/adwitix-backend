@@ -10,13 +10,36 @@ namespace App\Libraries;
 // `service('response')` instance instead.
 class ApiResponse
 {
+    // Credential columns that must never leave the server, whichever
+    // endpoint returns a row holding them (e.g. a whole `party` row).
+    // Only ever read server-side (password_verify, TOTP checks).
+    private const SECRET_KEYS = ['mpin_hash', 'totp_secret', 'password_hash', 'otp_hash', 'code_hash', 'client_secret_hash'];
+
     public static function send($response, $data = [], ?string $message = null, int $httpCode = 200)
     {
         $ok = $httpCode < 400;
         return $response->setStatusCode($httpCode)->setJSON([
             'status' => $ok,
             'message' => $message ?? ($ok ? 'Success' : 'Error'),
-            'data' => $data ?? [],
+            'data' => self::withoutSecrets($data ?? []),
         ]);
+    }
+
+    private static function withoutSecrets($value)
+    {
+        if (is_object($value) && !($value instanceof \JsonSerializable)) {
+            $value = get_object_vars($value);
+        }
+        if (!is_array($value)) {
+            return $value;
+        }
+        foreach ($value as $key => $item) {
+            if (is_string($key) && in_array($key, self::SECRET_KEYS, true)) {
+                unset($value[$key]);
+            } elseif (is_array($item) || is_object($item)) {
+                $value[$key] = self::withoutSecrets($item);
+            }
+        }
+        return $value;
     }
 }
