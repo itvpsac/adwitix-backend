@@ -1,12 +1,10 @@
 # Read-only: watches the live API through a code update to see whether
-# requests fail while the server's code folder is being replaced. Runs on
-# every push to main (the same event that makes the host re-pull the code)
-# and by hand. Changes nothing on the server.
+# requests fail while the site switches releases. Run by hand, around a
+# deploy; not on every push, since a request a second for four minutes
+# can trip the host's rate limiting. Changes nothing on the server.
 name: Deploy probe
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
