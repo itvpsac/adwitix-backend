@@ -41,6 +41,20 @@ jobs:
             done
           done
 
+      - name: Reproduce intermittent errors
+        run: |
+          for url in \
+            "https://admin.adwitix.com/public/index.php/api/v1/app/tenants" \
+            "https://admin.adwitix.com/public/uploads/listings/none/none.webp"; do
+            codes=""
+            for i in $(seq 1 20); do
+              code=$(curl -s --max-time 20 -o /tmp/body -w '%{http_code}' "$url")
+              codes="$codes $code"
+              if [ "${code:0:1}" = 5 ]; then echo "--- $code body from $url (request $i):"; head -c 1500 /tmp/body; echo; fi
+            done
+            echo "$url →$codes"
+          done
+
       - name: Set up SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -70,6 +84,12 @@ jobs:
           [ -n "$LISTING_ID" ] && { echo "== files for $LISTING_ID"; ls -la "$DEPLOY_PATH/public/uploads/listings/$LISTING_ID" 2>&1 | head -20; }
           echo "== public/.htaccess"; cat "$DEPLOY_PATH/public/.htaccess" 2>&1 | head -40
           echo "== docroot .htaccess"; cat "$DEPLOY_PATH/.htaccess" 2>&1 | head -40
+          echo "== CodeIgniter log (latest, errors only)"
+          latest=$(ls -t "$DEPLOY_PATH"/writable/logs/log-*.log 2>/dev/null | head -1)
+          if [ -n "$latest" ]; then echo "$latest"; grep -E '^(ERROR|CRITICAL|ALERT|EMERGENCY)' "$latest" | tail -40; else echo "no CodeIgniter log files"; fi
+          echo "== PHP error_log files"
+          find "$DEPLOY_PATH" "$(dirname "$DEPLOY_PATH")" -maxdepth 3 -name 'error_log' -newermt '-2 days' 2>/dev/null | while read -r f; do echo "-- $f"; tail -30 "$f"; done
+          [ -d "$HOME/logs" ] && { echo "== ~/logs"; ls -la "$HOME/logs" | head; }
           echo "== disk"; df -h "$DEPLOY_PATH" 2>&1; df -i "$DEPLOY_PATH" 2>&1
           echo "== quota"; quota -s 2>&1 | head -10 || true
           echo "== try mkdir"; d="$DEPLOY_PATH/.deploy-probe-$$"; mkdir "$d" && echo "mkdir ok" && rmdir "$d"
