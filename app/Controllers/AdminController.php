@@ -45,13 +45,15 @@ class AdminController extends BaseController
         // Days stalled computed here, not in SQL: the Postgres-only
         // EXTRACT(DAY FROM now() - ...) form doesn't run on MySQL.
         $stalledAging = $db->table('settlement s')
-            ->select('s.id, s.final_price, s.created_at')
+            ->select('s.id, s.final_price, s.created_at, s.stall_flagged_at')
             ->where('s.status', 'stalled')
             ->orderBy('s.created_at', 'ASC')
             ->limit(20)
             ->get()->getResultArray();
         foreach ($stalledAging as &$row) {
-            $row['days_stalled'] = (int) floor((time() - strtotime($row['created_at'])) / 86400);
+            // Stalled since it was flagged (the sale itself may be older).
+            $row['stalled_since'] = $row['stall_flagged_at'] ?: $row['created_at'];
+            $row['days_stalled'] = (int) floor((time() - strtotime($row['stalled_since'])) / 86400);
         }
         unset($row);
 
