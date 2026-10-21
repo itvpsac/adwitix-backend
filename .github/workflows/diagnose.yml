@@ -23,7 +23,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
     steps:
       - name: API health
-        run: curl -s -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
+        run: curl -s --max-time 20 -o /dev/null -w 'GET /api/v1/app/tenants → %{http_code}\n' https://admin.adwitix.com/public/index.php/api/v1/app/tenants || true
 
       - name: Listing media
         if: inputs.listing_id != ''
@@ -32,12 +32,12 @@ jobs:
           SITE: ${{ inputs.site }}
         run: |
           api="https://admin.adwitix.com/public/index.php/api/v1/app/listings/$LISTING_ID"
-          body=$(curl -s "$api")
-          echo "GET $api → $(curl -s -o /dev/null -w '%{http_code}' "$api")"
+          body=$(curl -s --max-time 20 "$api")
+          echo "GET $api → $(curl -s --max-time 20 -o /dev/null -w '%{http_code}' "$api")"
           echo "$body" | jq '{status, message, media: [.data.media[]? | {media_type, file_path, is_primary}], queued: .data.queuedMediaJobs}'
           for p in $(echo "$body" | jq -r '.data.media[]?.file_path'); do
             for url in "$SITE/$p" "https://admin.adwitix.com/public/$p" "https://admin.adwitix.com/$p"; do
-              echo "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
+              echo "$(curl -s --max-time 20 -o /dev/null -w '%{http_code} %{content_type}' "$url")  $url"
             done
           done
 
@@ -58,6 +58,9 @@ jobs:
             DEPLOY_PATH="$DEPLOY_PATH" LISTING_ID="$LISTING_ID" bash -s <<'REMOTE'
           echo "== deploy dir"; ls -la "$DEPLOY_PATH" 2>&1 | head -40
           echo "== app/"; ls -la "$DEPLOY_PATH/app" 2>&1 | head -30
+          echo "== storage"; root=$(grep '^storage\.root' "$DEPLOY_PATH/.env" | sed 's/^[^=]*= *//'); echo "storage.root = ${root:-<unset>}"
+          [ -n "$root" ] && { ls -la "$root" 2>&1; echo "public files: $(find "$root/uploads" -type f 2>/dev/null | wc -l), KYC files: $(find "$root/kyc_vault" -type f 2>/dev/null | wc -l)"; }
+          [ -n "$root" ] && [ -n "$LISTING_ID" ] && ls -la "$root/uploads/listings/$LISTING_ID" 2>&1 | head -20
           echo "== public/uploads/listings"; ls "$DEPLOY_PATH/public/uploads/listings" 2>&1 | head -20
           [ -n "$LISTING_ID" ] && { echo "== files for $LISTING_ID"; ls -la "$DEPLOY_PATH/public/uploads/listings/$LISTING_ID" 2>&1 | head -20; }
           echo "== public/.htaccess"; cat "$DEPLOY_PATH/public/.htaccess" 2>&1 | head -40

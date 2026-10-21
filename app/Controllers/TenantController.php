@@ -98,10 +98,7 @@ class TenantController extends BaseController
             if (!in_array($logo->getMimeType(), $allowed, true)) {
                 return $this->jsonError(422, 'invalid_logo_type', 'Logo must be JPEG, PNG, WebP, or SVG.');
             }
-            $uploadDir = WRITEPATH . '../public/uploads/tenants/' . $tenantId;
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
+            $uploadDir = dirname(\App\Libraries\StoragePaths::publicPathForWrite("uploads/tenants/{$tenantId}/.keep"));
             $filename = 'logo_' . time() . '.' . $logo->getExtension();
             $logo->move($uploadDir, $filename);
             $update['branding_logo_url'] = '/uploads/tenants/' . $tenantId . '/' . $filename;

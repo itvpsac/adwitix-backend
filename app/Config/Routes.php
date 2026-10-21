@@ -165,6 +165,8 @@ $routes->get('/sale-events/(:segment)/tender/report', 'TenderController::auction
 // logout is client-side — the React app just discards the token.)
 $routes->get('/browse', 'Home::browse');
 $routes->get('/listings', 'Home::browse');
+// User files (listing media, tenant logos) from persistent storage.
+$routes->get('uploads/(:any)', 'UploadController::serve/$1');
 $routes->get('/api/v1/app/browse', 'Home::browseApi');
 $routes->get('/api/v1/app/admin/audit-log', 'AuditLogController::index', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/audit-log/verify', 'AuditLogController::verifyIntegrity', ['filter' => 'jwtSuperAdmin']);
