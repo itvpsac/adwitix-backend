@@ -90,6 +90,9 @@ jobs:
           echo "== PHP error_log files"
           find "$DEPLOY_PATH" "$(dirname "$DEPLOY_PATH")" -maxdepth 3 -name 'error_log' -newermt '-2 days' 2>/dev/null | while read -r f; do echo "-- $f"; tail -30 "$f"; done
           [ -d "$HOME/logs" ] && { echo "== ~/logs"; ls -la "$HOME/logs" | head; }
+          echo "== releases (permissions)"; base=$(dirname "$(dirname "$DEPLOY_PATH")")
+          for r in $(ls -1d "$base"/adwitix-releases/2* 2>/dev/null | tail -3); do stat -c '%A %U %n' "$r" "$r/public" "$r/public/index.php" "$r/.env" "$r/writable" 2>&1; done
+          stat -c '%A %U %n' "$base/adwitix-shared" "$base/adwitix-shared/.env" "$base/adwitix-shared/writable" "$base/adwitix-backups" 2>&1
           echo "== disk"; df -h "$DEPLOY_PATH" 2>&1; df -i "$DEPLOY_PATH" 2>&1
           echo "== quota"; quota -s 2>&1 | head -10 || true
           echo "== try mkdir"; d="$DEPLOY_PATH/.deploy-probe-$$"; mkdir "$d" && echo "mkdir ok" && rmdir "$d"
