@@ -42,11 +42,26 @@ class AdminController extends BaseController
 
         // Aging on stalled settlements — how long each has sat unresolved,
         // oldest first, so Super Admin can see what needs escalation.
+        // Days stalled computed here, not in SQL: the Postgres-only
+        // EXTRACT(DAY FROM now() - ...) form doesn't run on MySQL.
         $stalledAging = $db->table('settlement s')
-            ->select("s.id, s.final_price, s.created_at, EXTRACT(DAY FROM (now() - s.created_at)) as days_stalled")
+            ->select('s.id, s.final_price, s.created_at')
             ->where('s.status', 'stalled')
             ->orderBy('s.created_at', 'ASC')
             ->limit(20)
+            ->get()->getResultArray();
+        foreach ($stalledAging as &$row) {
+            $row['days_stalled'] = (int) floor((time() - strtotime($row['created_at'])) / 86400);
+        }
+        unset($row);
+
+        // Newest sign-ups, for the dashboard's Users preview (the full
+        // list is the User Directory).
+        $recentUsers = $db->table('party')
+            ->select('id, mobile_number, full_name, entity_type, kyc_status, star_rating, seller_star_rating, seller_delisted_at, shadow_banned_at_buyer, shadow_banned_at_seller, created_at')
+            ->where('archived_at', null)
+            ->orderBy('created_at', 'DESC')
+            ->limit(5)
             ->get()->getResultArray();
 
         return $this->apiResponse([
@@ -60,6 +75,7 @@ class AdminController extends BaseController
             'salesClosedToday' => $salesClosedToday,
             'disputesFiledToday' => $disputesFiledToday,
             'stalledAging' => $stalledAging,
+            'recentUsers' => $recentUsers,
         ]);
     }
 
