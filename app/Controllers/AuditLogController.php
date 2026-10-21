@@ -8,27 +8,40 @@ use App\Libraries\UserAuthContext;
 // jwtSuperAdmin-gated.
 class AuditLogController extends BaseController
 {
+    // ?event_type, ?actor_mobile, ?from / ?to (YYYY-MM-DD, inclusive),
+    // ?page (1-based) and ?per_page (≤ 100). Newest first.
     public function index()
     {
         $db = \Config\Database::connect();
         $eventType = $this->request->getGet('event_type');
         $actorMobile = $this->request->getGet('actor_mobile');
+        $from = $this->request->getGet('from');
+        $to = $this->request->getGet('to');
+        $perPage = max(1, min(100, (int) ($this->request->getGet('per_page') ?: 100)));
+        $page = max(1, (int) ($this->request->getGet('page') ?: 1));
+        $isDate = fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d);
 
         $query = $db->table('audit_log al')
             ->select('al.id, al.occurred_at, al.event_type, al.actor_party_id, al.ip_address, al.payload, al.record_hash, al.sequence_number, p.mobile_number')
-            ->join('party p', 'p.id = al.actor_party_id', 'left')
-            ->orderBy('al.sequence_number', 'DESC')
-            ->limit(100);
-
+            ->join('party p', 'p.id = al.actor_party_id', 'left');
         if ($eventType) {
             $query->where('al.event_type', $eventType);
         }
         if ($actorMobile) {
             $query->where('p.mobile_number', $actorMobile);
         }
+        if ($isDate($from)) {
+            $query->where('al.occurred_at >=', $from . ' 00:00:00');
+        }
+        if ($isDate($to)) {
+            $query->where('al.occurred_at <=', $to . ' 23:59:59.999999');
+        }
+        $total = $query->countAllResults(false);
+        $entries = $query->orderBy('al.sequence_number', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
 
         return $this->apiResponse([
-            'entries' => $query->get()->getResultArray(),
+            'entries' => $entries,
+            'total' => $total, 'page' => $page, 'perPage' => $perPage, 'totalPages' => (int) ceil($total / $perPage),
             'eventType' => $eventType, 'actorMobile' => $actorMobile,
         ]);
     }

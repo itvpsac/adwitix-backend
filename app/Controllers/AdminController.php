@@ -204,8 +204,15 @@ class AdminController extends BaseController
             ->join('party p', 'p.id = r.party_id')->where('r.status', 'pending')->get()->getResultArray() as $r) {
             $add('payout', $r['id'], 'Payout release · ₹' . number_format((float) $r['amount']), ucfirst(str_replace('_', ' ', (string) $r['release_type'])) . ' · ' . $who($r), $r['created_at'], 'custodian', ['amount' => (float) $r['amount']]);
         }
+        // BR-36: a downgrade to 2.0 or below needs the Super Admin as well as
+        // the Tenant Admin; a milder one needs only the Tenant Admin, so
+        // the Super Admin's approval alone would not apply it.
         foreach ((new \App\Models\RatingEventModel())->findAllPending() as $r) {
-            $add('rating', $r['id'], 'Rating change · ' . ($r['mobile_number'] ?? ''), sprintf('%s rating %s → %s%s', ucfirst((string) $r['rating_role']), $r['previous_value'], $r['new_value'], $r['reason'] ? ' · ' . $r['reason'] : ''), $r['created_at'], 'custodian');
+            $needsSuperAdmin = (float) $r['new_value'] <= 2.0 && empty($r['super_admin_approved_at']);
+            $add('rating', $r['id'], 'Rating change · ' . ($r['mobile_number'] ?? ''),
+                sprintf('%s rating %s → %s%s', $r['rating_role'] === 'seller_star_rating' ? 'Market Maker' : 'Trader', (float) $r['previous_value'], (float) $r['new_value'], $r['reason'] ? ' · ' . $r['reason'] : '')
+                    . ($needsSuperAdmin ? '' : ' · waiting on the TSX Master'),
+                $r['created_at'], $needsSuperAdmin ? 'custodian' : 'tsx_master');
         }
         foreach ($db->table('settlement s')->select('s.id, s.final_price, s.created_at, s.stall_flagged_at, t.name AS tenant_name')
             ->join('sale_event se', 'se.id = s.sale_event_id', 'left')->join('listing l', 'l.id = se.listing_id', 'left')->join('tenant t', 't.id = l.tenant_id', 'left')

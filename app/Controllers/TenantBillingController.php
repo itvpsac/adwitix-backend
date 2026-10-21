@@ -32,7 +32,21 @@ class TenantBillingController extends BaseController
     // jwtSuperAdmin-gated.
     public function index()
     {
-        return $this->apiResponse(['pending' => (new TenantMonthlyInvoiceModel())->findAllPending()]);
+        // ?status = pending (default) | paid | all. `pending` stays for
+        // existing callers; `invoices` is the filtered list with tenant names.
+        $status = $this->request->getGet('status') ?: 'pending';
+        $builder = \Config\Database::connect()->table('tenant_monthly_invoice i')
+            ->select('i.*, t.name AS tenant_name')
+            ->join('tenant t', 't.id = i.tenant_id', 'left')
+            ->orderBy('i.period_start', 'DESC');
+        if (in_array($status, ['pending', 'paid'], true)) {
+            $builder->where('i.status', $status);
+        }
+        return $this->apiResponse([
+            'pending' => (new TenantMonthlyInvoiceModel())->findAllPending(),
+            'invoices' => $builder->get()->getResultArray(),
+            'status' => $status,
+        ]);
     }
 
     // Marking an invoice paid is a manual SaaS Admin action — no

@@ -34,8 +34,22 @@ class KycReviewController extends BaseController
 
     public function index()
     {
-        $submitted = $this->partyModel->where('kyc_status', 'submitted')->orderBy('kyc_submitted_at', 'ASC')->findAll();
-        return $this->apiResponse(['parties' => $submitted]);
+        // ?status = submitted (default, oldest first) | verified | suspended
+        // (most recently updated first). Only the columns the queue shows,
+        // plus each dossier's document and address counts.
+        $status = $this->request->getGet('status') ?: 'submitted';
+        if (!in_array($status, ['submitted', 'verified', 'suspended'], true)) {
+            return $this->jsonError(422, 'invalid_status', 'Status must be submitted, verified or suspended.');
+        }
+        $parties = \Config\Database::connect()->table('party p')
+            ->select('p.id, p.mobile_number, p.full_name, p.entity_type, p.kyc_status, p.kyc_status_reason, p.kyc_submitted_at, p.updated_at, p.edd_required_at, p.edd_cleared_at,
+                (SELECT COUNT(*) FROM party_document d WHERE d.party_id = p.id) AS document_count,
+                (SELECT COUNT(*) FROM party_address a WHERE a.party_id = p.id) AS address_count', false)
+            ->where('p.kyc_status', $status)->where('p.archived_at', null)
+            ->orderBy($status === 'submitted' ? 'p.kyc_submitted_at' : 'p.updated_at', $status === 'submitted' ? 'ASC' : 'DESC')
+            ->limit(200)
+            ->get()->getResultArray();
+        return $this->apiResponse(['parties' => $parties, 'status' => $status]);
     }
 
     public function detail(string $partyId)

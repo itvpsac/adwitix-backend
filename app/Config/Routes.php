@@ -80,6 +80,7 @@ $routes->post('/api/v1/app/settlements/(:segment)/force-resolve', 'SettlementCon
 
 // Dispute Resolution Framework (BR-40)
 $routes->post('/api/v1/app/sale-events/(:segment)/dispute', 'DisputeController::fileSubmit/$1', ['filter' => 'jwtAuth']);
+$routes->get('/api/v1/app/disputes', 'DisputeController::mine', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/disputes/(:segment)', 'DisputeController::show/$1', ['filter' => 'jwtAuth']);
 $routes->post('/api/v1/app/disputes/(:segment)/evidence', 'DisputeController::submitEvidence/$1', ['filter' => 'jwtAuth']);
 $routes->post('/api/v1/app/disputes/(:segment)/rule', 'DisputeController::rule/$1', ['filter' => 'jwtAuth']);

@@ -31,7 +31,9 @@ class AdminDirectoryService
                       t.id as tenant_id, t.name as tenant_name,
                       se.id as sale_event_id, se.sale_format, se.status as sale_status')
             ->join('tenant t', 't.id = l.tenant_id')
-            ->join('sale_event se', 'se.listing_id = l.id', 'left');
+            // Only each listing's latest sale event, so a re-listed lot is
+            // one row (and counted once), not one per sale event.
+            ->join('sale_event se', 'se.id = (SELECT se2.id FROM sale_event se2 WHERE se2.listing_id = l.id ORDER BY se2.created_at DESC LIMIT 1)', 'left', false);
         if ($q) $builder->groupStart()->like('l.category', $q)->orLike('l.subcategory', $q)->orLike('t.name', $q)->groupEnd();
         if ($tenantId) $builder->where('l.tenant_id', $tenantId);
         if ($format) $builder->where('se.sale_format', $format);
