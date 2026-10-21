@@ -92,7 +92,11 @@ class Filters extends BaseFilters
             // forged cross-site request from a logged-in browser).
             'csrf' => ['except' => ['api/*']],
             // 'invalidchars',
-            'tenantResolve', // BR-06: Host-header tenant resolution, every request
+            // User files (uploads/*) are served without either DB-backed
+            // filter below: an image needs no tenant or viewer, and a page
+            // loading many images at once would otherwise open one database
+            // connection per image and hit the host's connection limit.
+            'tenantResolve' => ['except' => ['uploads/*']], // BR-06: Host-header tenant resolution
             // D-137 (Phase 6): populates UserAuthContext from a Bearer
             // token when one is offered, without rejecting requests that
             // don't — see JwtOptionalAuthFilter's own docblock. Runs
@@ -101,7 +105,7 @@ class Filters extends BaseFilters
             // keep degrading to "anonymous viewer" instead of silently
             // losing their personalization now that nothing sets the
             // old PHP session anymore.
-            'jwtOptional',
+            'jwtOptional' => ['except' => ['uploads/*']],
         ],
         'after' => [
             // 'honeypot',

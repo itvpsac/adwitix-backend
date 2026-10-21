@@ -217,7 +217,11 @@ class ListingController extends BaseController
         $offers = [];
         $expressState = null;
         $settlementRecord = null;
-        $media = (new \App\Models\ListingMediaModel())->findForListing($listingId);
+        // Only media whose file exists is shown; the count of missing
+        // files tells the seller what to re-add (see ListingMediaModel).
+        $allMedia = (new \App\Models\ListingMediaModel())->findForListing($listingId);
+        $media = array_values(array_filter($allMedia, fn($m) => $m['file_available']));
+        $missingMediaCount = count($allMedia) - count($media);
         // PR-09: files still in the background queue (pending/processing/
         // failed) — shown alongside finished media so the seller sees real
         // upload progress instead of files silently vanishing until done.
@@ -321,6 +325,10 @@ class ListingController extends BaseController
             'queuedMediaJobs' => $queuedMediaJobs, 'myOpenTopup' => $myOpenTopup, 'myOpenTopupOwed' => $myOpenTopupOwed,
             'myEmdHold' => $myEmdHold,
             'isOwner' => $viewerId === $listing['seller_party_id'],
+            'missingMediaCount' => $missingMediaCount,
+            // Mirrors MediaService::enqueueUploads()'s own checks.
+            'canAddMedia' => $viewerId !== null && $viewerId === $listing['seller_party_id']
+                && in_array($listing['status'], ['inventory', 'pending_approval'], true),
             'canFlagCbsViolation' => $isTenantAdminForListing,
             'isTenantAdminForListing' => $isTenantAdminForListing,
             'minPhotos' => \App\Libraries\MediaService::minPhotos(),

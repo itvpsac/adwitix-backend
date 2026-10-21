@@ -38,8 +38,24 @@ class ListingMediaModel extends Model
         // evaluates true regardless of the actual value.
         foreach ($rows as &$row) {
             $row['is_primary'] = in_array($row['is_primary'], [true, 't', 1, '1'], true);
+            // Whether the file is actually on disk. Rows are kept when a
+            // file goes missing (it may yet be restored from a backup);
+            // callers decide whether to show them.
+            $row['file_available'] = \App\Libraries\StoragePaths::findPublicFile((string) $row['file_path']) !== null;
         }
         return $rows;
+    }
+
+    // True when the listing has a primary photo whose file exists — what
+    // every listing card shows as its image.
+    public function hasAvailablePrimaryPhoto(string $listingId): bool
+    {
+        foreach ($this->findForListing($listingId) as $row) {
+            if ($row['media_type'] === 'photo' && $row['is_primary'] && $row['file_available']) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function countForListing(string $listingId, ?string $mediaType = null): int

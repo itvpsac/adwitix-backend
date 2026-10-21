@@ -156,10 +156,12 @@ class MediaService
         $compression = new MediaCompressionService();
 
         if ($isImage) {
-            // First photo to finish processing becomes primary by
-            // default — checked at PROCESS time (not enqueue time),
+            // The first photo to finish processing becomes primary — and
+            // so does a new photo when the current primary's file is
+            // missing, so the listing's card image recovers when photos
+            // are re-added. Checked at PROCESS time (not enqueue time),
             // since jobs may finish out of upload order.
-            $isFirstPhoto = $this->mediaModel->countForListing($listingId, 'photo') === 0;
+            $isFirstPhoto = !$this->mediaModel->hasAvailablePrimaryPhoto($listingId);
 
             $finalName = Uuid::v4() . '.webp';
             $finalPath = $uploadDir . '/' . $finalName;
@@ -198,6 +200,10 @@ class MediaService
             $mediaData['compressed_size_bytes'] = $originalSize;
         }
 
+        if ($mediaData['is_primary']) {
+            // Clears a missing-file primary before this one takes over.
+            $this->mediaModel->clearPrimaryForListing($listingId);
+        }
         $media = $this->mediaModel->createMedia($mediaData);
 
         // media_count feeds directly into BR-11's "5 photos required"
