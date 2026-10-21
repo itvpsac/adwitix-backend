@@ -1,0 +1,49 @@
+# Nightly backup of the database and all user files (photos, logos, KYC
+# vault) into BASE/adwitix-backups on the server, beside the site and
+# outside the web root; 14 days are kept. Also runnable by hand. The deploy
+# separately dumps the database before running migrations. See
+# scripts/backup.sh for what is backed up and how to restore.
+name: Backup
+
+on:
+  schedule:
+    - cron: '43 20 * * *' # 02:13 IST
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend # never alongside a deploy
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ] && break
+            echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
+
+      - name: Back up
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          set -euo pipefail
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          BACKUP_DIR="$BASE/adwitix-backups" bash "$DEPLOY_PATH/scripts/backup.sh"
+          echo "== backups on the server"
+          ls -lh "$BASE/adwitix-backups" | tail -n +2
+          du -sh "$BASE/adwitix-backups"
+          REMOTE
