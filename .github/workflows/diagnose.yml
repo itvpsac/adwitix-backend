@@ -46,6 +46,21 @@ jobs:
           code=$(curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://admin.adwitix.com/public/index.php/api/v1/app/admin/system-health)
           echo "GET /admin/system-health without a token → $code (401/403 expected; 200 means admin.authBypass is ON)"
 
+      - name: Performance timings (read-only)
+        env:
+          SITE: ${{ inputs.site }}
+        run: |
+          t() { for i in 1 2 3; do curl -s -o /dev/null --max-time 30 -w "  dns %{time_namelookup}s · connect %{time_connect}s · tls %{time_appconnect}s · first byte %{time_starttransfer}s · total %{time_total}s · %{size_download} bytes · HTTP %{http_code}\n" "$1"; done; }
+          echo "== Backend direct (admin.adwitix.com)"; for u in api/v1/app/tenants "api/v1/app/browse"; do echo "$u"; t "https://admin.adwitix.com/public/index.php/$u"; done
+          echo "== Through the Vercel proxy ($SITE)"; for u in api/v1/app/tenants "api/v1/app/browse"; do echo "$u"; t "$SITE/$u"; done
+          echo "== Frontend page and bundle"; echo "/"; t "$SITE/"
+          js=$(curl -s "$SITE/" | grep -o '/assets/index-[^"]*\.js' | head -1); echo "$js"; t "$SITE$js"
+          echo "== Headers"; curl -sI "$SITE/" | grep -iE "x-vercel-id|cache-control|content-encoding|^server" ; curl -sI "$SITE$js" | grep -iE "cache-control|content-encoding|x-vercel-cache"
+          curl -sI "$SITE/api/v1/app/tenants" | grep -iE "x-vercel-id|cache-control|content-encoding|server"
+          curl -sI "https://admin.adwitix.com/public/index.php/api/v1/app/tenants" | grep -iE "cache-control|content-encoding|server|x-powered-by|x-litespeed"
+          img=$(curl -s "https://admin.adwitix.com/public/index.php/api/v1/app/browse" | grep -o '"file_path":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's#\\/#/#g'); [ -n "$img" ] && { echo "image $img"; t "$SITE/$img"; curl -sI "$SITE/$img" | grep -iE "cache-control|content-type|content-length|x-vercel-cache"; }
+          echo "== Where the backend server is"; ip=$(getent hosts admin.adwitix.com | awk '{print $1}' | head -1); echo "admin.adwitix.com -> $ip"; curl -s --max-time 10 "https://ipinfo.io/$ip/json" | grep -E '"(city|region|country|org)"' || true
+
       - name: Reproduce intermittent errors
         run: |
           for url in \
