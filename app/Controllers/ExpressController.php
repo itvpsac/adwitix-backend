@@ -26,6 +26,10 @@ class ExpressController extends BaseController
     {
         $buyerId = UserAuthContext::partyId();
 
+        if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($buyerId)) {
+            return $this->jsonError(403, 'br15_super_admin_barred', 'BR-15: the Super Admin holds a non-participatory regulatory role and may never bid, offer or pledge.');
+        }
+
         try {
             $this->express->pledgeReserve($saleEventId, $buyerId);
         } catch (\RuntimeException $e) {
@@ -38,6 +42,10 @@ class ExpressController extends BaseController
     public function placeBid(string $saleEventId)
     {
         $bidderId = UserAuthContext::partyId();
+
+        if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($bidderId)) {
+            return $this->jsonError(403, 'br15_super_admin_barred', 'BR-15: the Super Admin holds a non-participatory regulatory role and may never bid, offer or pledge.');
+        }
         $amount = (float) $this->input('amount');
 
         try {

@@ -17,7 +17,7 @@ class DashboardService
         $db = \Config\Database::connect();
 
         $activeBids = $db->table('bid b')
-            ->select("b.id, b.amount, b.standing, se.id as sale_event_id, se.sale_format, se.status as sale_status, l.category")
+            ->select("b.id, b.amount, b.standing, se.id as sale_event_id, l.id as listing_id, se.sale_format, se.status as sale_status, l.category")
             ->join('sale_event se', 'se.id = b.sale_event_id')
             ->join('listing l', 'l.id = se.listing_id')
             ->where('b.bidder_party_id', $partyId)
@@ -27,7 +27,7 @@ class DashboardService
             ->limit(5)->get()->getResultArray();
 
         $openOffers = $db->table('offer o')
-            ->select('o.id, o.amount, se.id as sale_event_id, l.category')
+            ->select('o.id, o.amount, se.id as sale_event_id, l.id as listing_id, l.category')
             ->join('sale_event se', 'se.id = o.sale_event_id')
             ->join('listing l', 'l.id = se.listing_id')
             ->where('o.buyer_party_id', $partyId)

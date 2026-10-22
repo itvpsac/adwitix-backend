@@ -365,6 +365,7 @@ class UserAuthApiService
             'email' => $party['recovery_email'] ?? null,
             'entity_type' => $party['entity_type'] ?? null,
             'kyc_status' => $party['kyc_status'] ?? null,
+            'created_at' => $party['created_at'] ?? null,
             'roles' => $roles,
             'admin_tenants' => $adminTenants,
         ];

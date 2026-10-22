@@ -271,7 +271,12 @@ class MyActivityController extends BaseController
 
     public function profile()
     {
-        $party = (new \App\Models\PartyModel())->find(UserAuthContext::partyId());
+        $cols = ['id', 'star_rating', 'seller_star_rating'];
+        foreach (['buyer', 'seller'] as $side) {
+            array_push($cols, "shadow_banned_at_{$side}", "crawl_back_active_{$side}",
+                "crawl_back_clean_required_{$side}", "crawl_back_clean_completed_{$side}");
+        }
+        $party = (new \App\Models\PartyModel())->select($cols)->find(UserAuthContext::partyId());
         return $this->apiResponse(['party' => $party]);
     }
 
@@ -294,7 +299,12 @@ class MyActivityController extends BaseController
     // D-106: "Star Ratings" -- a party's current standing in both roles.
     public function starRatings()
     {
-        $party = (new \App\Models\PartyModel())->find(UserAuthContext::partyId());
+        $cols = ['id', 'star_rating', 'seller_star_rating'];
+        foreach (['buyer', 'seller'] as $side) {
+            array_push($cols, "shadow_banned_at_{$side}", "crawl_back_active_{$side}",
+                "crawl_back_clean_required_{$side}", "crawl_back_clean_completed_{$side}");
+        }
+        $party = (new \App\Models\PartyModel())->select($cols)->find(UserAuthContext::partyId());
         return $this->apiResponse(['party' => $party]);
     }
 

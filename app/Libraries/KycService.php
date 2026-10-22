@@ -253,6 +253,9 @@ class KycService
         if (!$party) {
             throw new \RuntimeException('Party not found.');
         }
+        if (($party['kyc_status'] ?? null) === 'verified') {
+            throw new \RuntimeException('Your KYC is already verified.');
+        }
         if (empty($party['full_name']) && $party['entity_type'] === 'individual') {
             throw new \RuntimeException('Complete the KYC questionnaire before submitting for review.');
         }

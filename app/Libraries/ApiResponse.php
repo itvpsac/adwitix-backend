@@ -13,7 +13,7 @@ class ApiResponse
     // Credential columns that must never leave the server, whichever
     // endpoint returns a row holding them (e.g. a whole `party` row).
     // Only ever read server-side (password_verify, TOTP checks).
-    private const SECRET_KEYS = ['mpin_hash', 'totp_secret', 'password_hash', 'otp_hash', 'code_hash', 'client_secret_hash'];
+    private const SECRET_KEYS = ['mpin_hash', 'totp_secret', 'password_hash', 'otp_hash', 'code_hash', 'client_secret_hash', 'webhook_signing_secret'];
 
     public static function send($response, $data = [], ?string $message = null, int $httpCode = 200)
     {

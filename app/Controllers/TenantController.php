@@ -135,7 +135,12 @@ class TenantController extends BaseController
     // knowing a tenant ID.
     public function directory()
     {
-        $tenants = $this->tenantModel->orderBy('name', 'ASC')->findAll();
+        // Public: only what an applicant needs to pick a tenant, never
+        // webhook secrets or plan internals, and no suspended tenants.
+        $tenants = $this->tenantModel
+            ->select('id, name, tenant_class, subdomain, custom_domain, subscription_tier, branding_primary_color')
+            ->where('suspended_at', null)
+            ->orderBy('name', 'ASC')->findAll();
         return $this->apiResponse(['tenants' => $tenants]);
     }
 }
