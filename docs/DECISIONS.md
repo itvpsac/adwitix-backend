@@ -8832,3 +8832,32 @@ the seller."
   - The TradeSphereX Directory card for Salvage Managers says "List a Lot Here" instead of "Apply".
   - Create Lot offers Salvage Managers to every seller.
 - **`ADWITIX_Master.docx`, BR-09:** adds the Salvage Managers exception.
+
+### D-132: The Custodian watches and can stop; the TSX Master approves
+
+**Decision (project owner):** "The lots shown on custodian panel just for
+status and checking what is being sold, if required should be able to
+stop any lot or event. Basic approval for lot and event is given by tsx
+master themselves."
+
+**Already true:** approving a Lot or Trading Session goes through
+`jwtTenantAdmin`, which the Super Admin does not pass (verified: 403). The
+Decision Queue lists pending Lots only as "Waiting on the TSX Master".
+
+**Built:**
+- **`POST /admin/sale-events/:id/stop {reason}`** (jwtSuperAdmin):
+  - Runs the BR-14 emergency stop (`ListingLifecycleService::emergencyStop`): cancels the session, withdraws bids and releases every EMD hold.
+  - Works only while the session is pending approval, in grace period or active.
+- **`POST /admin/listings/:id/stop {reason}`** (jwtSuperAdmin):
+  - Emergency-stops every live session on the Lot.
+  - Sets the Lot to `suspended`, with "Stopped by the Custodian: …" shown to the seller.
+  - Logs `listing.stopped_by_custodian`.
+  - A sold, ended or already-suspended Lot is refused (409).
+- **Reason:** both endpoints require one, and it goes into the audit chain.
+- **Frontend:** a Stop button on the Lot Directory and Trading Session Directory for live rows (`components/custodian/StopAction.jsx`). It opens a confirmation dialog with a required reason.
+
+**Hardening found while testing:** the temporary `admin.authBypass`
+switch makes every caller the Super Admin. It is now ignored whenever
+`CI_ENVIRONMENT` is production, in both `JwtSuperAdminFilter` and
+`devBypassLogin`. `diagnose.yml` now checks it. On 22 Oct 2026 production
+answered 401 to an anonymous admin call, so the switch was off there.
