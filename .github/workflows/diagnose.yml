@@ -59,6 +59,8 @@ jobs:
           curl -sI "$SITE/api/v1/app/tenants" | grep -iE "x-vercel-id|cache-control|content-encoding|server"
           curl -sI "https://admin.adwitix.com/public/index.php/api/v1/app/tenants" | grep -iE "cache-control|content-encoding|server|x-powered-by|x-litespeed"
           img=$(curl -s "https://admin.adwitix.com/public/index.php/api/v1/app/browse" | grep -o '"file_path":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's#\\/#/#g'); [ -n "$img" ] && { echo "image $img"; t "$SITE/$img"; curl -sI "$SITE/$img" | grep -iE "cache-control|content-type|content-length|x-vercel-cache"; }
+          echo "== Static file vs PHP (same server)"; echo "favicon.ico (no PHP)"; t "https://admin.adwitix.com/public/favicon.ico"; echo "PHP without DB (401 expected)"; t "https://admin.adwitix.com/public/index.php/api/v1/app/admin/system-health"
+          echo "== Full API response headers"; curl -s -D - -o /dev/null "https://admin.adwitix.com/public/index.php/api/v1/app/tenants"
           echo "== Where the backend server is"; ip=$(getent hosts admin.adwitix.com | awk '{print $1}' | head -1); echo "admin.adwitix.com -> $ip"; curl -s --max-time 10 "https://ipinfo.io/$ip/json" | grep -E '"(city|region|country|org)"' || true
 
       - name: Reproduce intermittent errors
@@ -128,6 +130,9 @@ jobs:
           done
           cnf=$(mktemp); trap 'rm -f "$cnf"' EXIT
           db=$("$PHP" "$DEPLOY_PATH/spark" backup:mysql-config "$cnf" | tail -1)
+          echo "== App mode (non-secret settings)"; grep -E '^\s*(CI_ENVIRONMENT|app\.baseURL|toolbar|logger\.threshold)' "$DEPLOY_PATH/.env" || echo "CI_ENVIRONMENT not set in .env (defaults to production)"
+          echo "debugbar files: $(ls "$DEPLOY_PATH/writable/debugbar" 2>/dev/null | wc -l)"; echo "log size: $(du -sh "$DEPLOY_PATH/writable/logs" 2>/dev/null | cut -f1)"
+          "$PHP" -r 'echo "CLI opcache.enable=", ini_get("opcache.enable"), "\n";'
           mysql --defaults-extra-file="$cnf" -t "$db" <<'SQL'
           SELECT t.id, t.name, t.tenant_class, t.subscription_tier, t.subdomain, t.suspended_at,
                  (SELECT COUNT(*) FROM listing l WHERE l.tenant_id = t.id) AS lots,
