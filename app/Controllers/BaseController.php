@@ -80,4 +80,14 @@ abstract class BaseController extends Controller
     {
         return $this->apiResponse(['error' => $error], $description, $status);
     }
+
+    // D-134: a 403 for a frozen account, or null. Called first thing by
+    // every bid/offer/pledge/list/sell endpoint.
+    protected function refuseIfFrozen()
+    {
+        $partyId = \App\Libraries\UserAuthContext::partyId();
+        return $partyId && \App\Models\PartyModel::isFrozen($partyId)
+            ? $this->jsonError(403, 'account_frozen', 'Your account has been frozen by the Custodian. You can still sign in and complete open settlements, but you can\'t bid, offer, pledge or sell. Contact support to have it reviewed.')
+            : null;
+    }
 }

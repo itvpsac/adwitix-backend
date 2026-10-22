@@ -34,6 +34,10 @@ class BidController extends BaseController
     // real payment gateway connected.
     public function devFundEmd(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $bidderId = UserAuthContext::partyId();
 
         // BR-15: structurally barred from pledging under any
@@ -111,6 +115,10 @@ class BidController extends BaseController
 
     public function placeBid(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $bidderId = UserAuthContext::partyId();
 
         if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($bidderId)) {

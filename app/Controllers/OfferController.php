@@ -26,6 +26,10 @@ class OfferController extends BaseController
 
     public function devFundEmd(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $buyerId = UserAuthContext::partyId();
 
         // BR-15: structurally barred from pledging under any
@@ -66,6 +70,10 @@ class OfferController extends BaseController
 
     public function submit(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $buyerId = UserAuthContext::partyId();
 
         if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($buyerId)) {
@@ -102,6 +110,10 @@ class OfferController extends BaseController
     // enforced here by re-checking listing ownership against the caller.
     public function accept(string $saleEventId, string $offerId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $sellerId = UserAuthContext::partyId();
 
         $saleEvent = $this->saleEventModel->find($saleEventId);

@@ -272,6 +272,35 @@ class AdminController extends BaseController
         $chronicles = $seIds ? $db->table('trading_session_chronicle')->select('id, sale_event_id, settlement_id, reference_number, version, superseded_by_chronicle_id, generated_at')
             ->whereIn('sale_event_id', $seIds)->orderBy('generated_at', 'ASC')->get()->getResultArray() : [];
 
+        // BR-16 (kept, D-134): while a session is live the Custodian is blind
+        // to who is bidding — amounts and timings show, bidders read as
+        // "Bidder 1, 2, …" (stable within the session). Names unlock at close.
+        $mask = [];
+        $relabel = function (array &$list, string $col, string $seId, int &$n) use (&$mask) {
+            foreach ($list as &$r) {
+                if ($r['sale_event_id'] === $seId && !empty($r[$col])) {
+                    $mask[$seId][$r[$col]] ??= 'Bidder ' . (++$n);
+                    $r[$col] = $mask[$seId][$r[$col]];
+                }
+            }
+        };
+        foreach ($sessions as &$se) {
+            if (!in_array($se['status'], self::LIVE_SESSION, true)) {
+                continue;
+            }
+            $n = 0;
+            $relabel($bids, 'bidder_party_id', $se['id'], $n);
+            $relabel($offers, 'buyer_party_id', $se['id'], $n);
+            $relabel($holds, 'party_id', $se['id'], $n);
+            $relabel($interest, 'party_id', $se['id'], $n);
+            if (!empty($se['current_high_bidder_party_id'])) {
+                $mask[$se['id']][$se['current_high_bidder_party_id']] ??= 'Bidder ' . (++$n);
+                $se['current_high_bidder_party_id'] = $mask[$se['id']][$se['current_high_bidder_party_id']];
+            }
+            $se['identities_hidden_until_close'] = true;
+        }
+        unset($se);
+
         $byEvent = fn(array $list) => array_reduce($list, function ($acc, $r) { $acc[$r['sale_event_id']][] = $r; return $acc; }, []);
         [$bidsBy, $offersBy, $holdsBy, $interestBy, $settleBy, $disputeBy, $chronBy] = array_map($byEvent, [$bids, $offers, $holds, $interest, $settlements, $disputes, $chronicles]);
         foreach ($sessions as &$se) {
@@ -306,6 +335,23 @@ class AdminController extends BaseController
             $audit->orLike('al.payload', $id);
         }
         $audit = $audit->groupEnd()->orderBy('al.sequence_number', 'ASC')->limit(500)->get()->getResultArray();
+        // …and in the audit trail of a live session, the same masking.
+        foreach ($audit as &$entry) {
+            foreach ($mask as $seId => $labels) {
+                if (str_contains((string) $entry['payload'], $seId)) {
+                    foreach ($labels as $pid => $lbl) {
+                        $entry['payload'] = str_replace($pid, $lbl, (string) $entry['payload']);
+                        if ($entry['actor_party_id'] === $pid) {
+                            $entry['actor_party_id'] = $lbl;
+                            $entry['actor_name'] = $lbl;
+                            $entry['actor_mobile'] = null;
+                            $entry['ip_address'] = null;
+                        }
+                    }
+                }
+            }
+        }
+        unset($entry);
 
         return $this->apiResponse([
             'listing' => $listing, 'tenant' => $tenant, 'tsxMasters' => $masters,

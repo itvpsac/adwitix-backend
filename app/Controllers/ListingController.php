@@ -68,6 +68,10 @@ class ListingController extends BaseController
 
     public function createSubmit()
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $sellerId = UserAuthContext::partyId();
 
         // BR-15: "structurally barred from listing assets... under any

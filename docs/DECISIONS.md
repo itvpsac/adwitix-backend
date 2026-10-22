@@ -8884,3 +8884,47 @@ Detail showing the Custodian "Identity not disclosed" for the seller.
 - **Links into the Lot file:**
   - The Lot Directory row title and the Trading Session Directory ERN open it, at that session.
   - For the Custodian only, Lot Detail now names the seller and links to the file. Buyers still see "Identity not disclosed" (verified).
+
+### D-134: Traders are the Custodian's to monitor and control (User file, Freeze)
+
+**Decision (project owner):** buyers/traders "are being monitored and
+controlled by custodian", who should "see everything about traders and
+their trading activities", their selling and TSX Master activity once they
+have those roles, and the "complete log and movement of star rating".
+Discussed against the rules first, then confirmed:
+1. **BR-16 stays (option A).** The Custodian is blind to bidder identity while a session is live. Names unlock at close.
+2. **Freeze account: yes.** Editing star ratings directly: no (BR-36).
+3. **Browsing stays private:** search history, saved searches, preferences, favourites and lots viewed are not shown.
+4. **Privacy Policy wording** is drafted for legal review.
+
+**Built:**
+- **`GET /admin/users/:id/dossier`** (`CustodianUserController`) returns everything about one person, across every TSX (BR-37):
+  - the full party row (credentials stripped by ApiResponse, Aadhaar masked as stored);
+  - every role, active or revoked, with its TSX;
+  - addresses, document metadata and BR-51 consents;
+  - as buyer: bids, offers, EMD holds, Tender interest and eligibility, purchases;
+  - as seller: applications, Lots, sessions, sales, seller messages;
+  - the rating state and every `rating_event`;
+  - disputes, chargebacks, AML flags and payout reviews;
+  - every audit entry they caused or are named in.
+- **BR-16 in the user file:** rows on a live session are withheld and only counted in `hiddenWhileLive`, and so are audit entries about that session.
+- **BR-16 in the Lot file (D-133 corrected):** bidders, offerers, depositors and the current high bidder in a live session are relabelled "Bidder 1, 2, …", and the same masking is applied to its audit entries.
+- **Freeze:**
+  - `POST /admin/users/:id/freeze` and `/unfreeze` require a reason, are logged (`party.frozen` / `party.unfrozen`), and the Custodian account cannot be frozen.
+  - Migration 000075 adds `party.frozen_at`, `frozen_reason` and `frozen_by_party_id`.
+  - `BaseController::refuseIfFrozen()` returns 403 `account_frozen` first thing in: bid, the EMD funding endpoints, offer submit/accept, Express pledge/bid, EMD consent confirm, Lot create, session create, Tender interest/bid.
+  - `KycService::requireVerifiedKyc` refuses too, which covers the Tenant API listing path.
+  - Sign-in, history and settlements are unaffected, and live Lots are not stopped automatically.
+- **Frontend:** `/user-detail` is now the User file (`pages/custodian/CustodianUser.jsx`). The old `UserDetail.jsx` is removed, and Promote to TSX Master is kept.
+  - A Freeze/Unfreeze dialog.
+  - A star-rating chart (`RatingChart.jsx`): a step line per score, validated two-colour palette, Crawl-Back line at 2.0, hover tooltips, with the full event ledger as its table view.
+  - TSX Master decisions are listed from the audit trail.
+- **Privacy:** `docs/drafts/Privacy_Policy_Custodian_oversight.md`, for legal review.
+
+**Verified:**
+- A live bid is hidden from the user file and counted.
+- In the Lot file, live bidders show as "Bidder 1/2".
+- A frozen account gets 403 on bid, offer, pledge, Lot create and EMD consent.
+- Unfreeze restores access; freezing the Custodian is refused.
+- Non-Custodians get 403 on the dossier.
+- The bidding, Express, Buy-Now, cascade, schedule, Tender, lifecycle and KYC suites (133 assertions) all pass.

@@ -143,6 +143,9 @@ $routes->post('/api/v1/app/admin/alerts/server-time-drift/(:segment)/acknowledge
 $routes->get('/api/v1/app/admin/tenants', 'TenantController::list', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants', 'TenantController::createSubmit', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users', 'UserController::index', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/users/(:segment)/dossier', 'CustodianUserController::dossier/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users/(:segment)/freeze', 'CustodianUserController::freeze/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users/(:segment)/unfreeze', 'CustodianUserController::unfreeze/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users/(:segment)', 'UserController::detail/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/users/(:segment)/promote-tenant-admin', 'UserController::promoteTenantAdmin/$1', ['filter' => 'jwtSuperAdmin']);
 

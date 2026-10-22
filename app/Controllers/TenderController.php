@@ -33,6 +33,10 @@ class TenderController extends BaseController
 
     public function registerInterest(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $partyId = $this->requireLogin();
         if (!$partyId) return redirect()->to('/login');
         $saleEvent = $this->saleEventModel->find($saleEventId);
@@ -126,6 +130,10 @@ class TenderController extends BaseController
 
     public function placeBid(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $partyId = $this->requireLogin();
         if (!$partyId) return redirect()->to('/login');
         $saleEvent = $this->saleEventModel->find($saleEventId);
