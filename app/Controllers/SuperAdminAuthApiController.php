@@ -185,7 +185,7 @@ class SuperAdminAuthApiController extends BaseController
     // POST /api/v1/app/admin/auth/dev-bypass-login
     public function devBypassLogin()
     {
-        if (env('admin.authBypass', false) !== true && env('admin.authBypass') !== 'true') {
+        if (ENVIRONMENT === 'production' || (env('admin.authBypass', false) !== true && env('admin.authBypass') !== 'true')) {
             return $this->jsonError(404, 'not_found', 'Not found.');
         }
 

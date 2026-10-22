@@ -183,6 +183,66 @@ class AdminController extends BaseController
     // 'custodian' items are acted on here; 'tsx_master' items (lot and
     // seller approvals, BR-09/BR-13) are shown so the Custodian can see
     // the backlog, but only the tenant's own TSX Master can approve them.
+    // D-132: the Custodian watches Lots and Trading Sessions but never
+    // approves them — that stays with each TSX Master (BR-09/BR-13). What
+    // the Custodian can do is stop any of them, with an audited reason.
+    private const LIVE_SESSION = ['pending_approval', 'grace_period', 'active'];
+
+    // POST /admin/sale-events/:id/stop {reason}: BR-14 emergency stop —
+    // cancels the session, withdraws bids, releases every EMD hold.
+    public function stopSaleEvent(string $saleEventId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for stopping this Trading Session.');
+        }
+        $se = (new \App\Models\SaleEventModel())->find($saleEventId);
+        if (!$se) {
+            return $this->jsonError(404, 'not_found', 'Trading Session not found.');
+        }
+        if (!in_array($se['status'], self::LIVE_SESSION, true)) {
+            return $this->jsonError(409, 'not_live', 'This Trading Session has already ended (' . str_replace('_', ' ', $se['status']) . ').');
+        }
+        try {
+            $saleEvent = (new \App\Libraries\ListingLifecycleService())->emergencyStop($saleEventId, "Custodian: {$reason}", UserAuthContext::partyId());
+        } catch (\RuntimeException $e) {
+            return $this->jsonError(422, 'stop_failed', $e->getMessage());
+        }
+        return $this->apiResponse(['saleEvent' => $saleEvent, 'message' => 'Trading Session stopped; bids withdrawn and deposits released.']);
+    }
+
+    // POST /admin/listings/:id/stop {reason}: stops a Lot — any live
+    // Trading Session on it is emergency-stopped first, then the Lot is
+    // suspended with the reason shown to its seller.
+    public function stopListing(string $listingId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for stopping this Lot.');
+        }
+        $listingModel = new \App\Models\ListingModel();
+        $listing = $listingModel->find($listingId);
+        if (!$listing) {
+            return $this->jsonError(404, 'not_found', 'Lot not found.');
+        }
+        if (in_array($listing['status'], ['sold', 'cycle_ended_unsold', 'suspended'], true)) {
+            return $this->jsonError(409, 'not_live', 'This Lot is already ' . str_replace('_', ' ', $listing['status']) . '.');
+        }
+        $actor = UserAuthContext::partyId();
+        $lifecycle = new \App\Libraries\ListingLifecycleService();
+        $stopped = [];
+        foreach ((new \App\Models\SaleEventModel())->where('listing_id', $listingId)->whereIn('status', self::LIVE_SESSION)->findAll() as $se) {
+            $lifecycle->emergencyStop($se['id'], "Custodian stopped the Lot: {$reason}", $actor);
+            $stopped[] = $se['id'];
+        }
+        $listingModel->update($listingId, ['status' => 'suspended', 'rejection_reason' => "Stopped by the Custodian: {$reason}", 'updated_at' => date('Y-m-d H:i:s')]);
+        (new \App\Libraries\AuditLogService())->log('listing.stopped_by_custodian', $actor, [
+            'listingId' => $listingId, 'reason' => $reason, 'saleEventsStopped' => $stopped,
+        ]);
+        return $this->apiResponse(['listing' => $listingModel->find($listingId), 'saleEventsStopped' => count($stopped),
+            'message' => 'Lot stopped' . ($stopped ? ' and its live Trading Session cancelled.' : '.')]);
+    }
+
     public function decisionQueue()
     {
         $db = \Config\Database::connect();

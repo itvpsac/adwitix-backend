@@ -41,6 +41,11 @@ jobs:
             done
           done
 
+      - name: Admin API refuses anonymous callers
+        run: |
+          code=$(curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://admin.adwitix.com/public/index.php/api/v1/app/admin/system-health)
+          echo "GET /admin/system-health without a token → $code (401/403 expected; 200 means admin.authBypass is ON)"
+
       - name: Reproduce intermittent errors
         run: |
           for url in \

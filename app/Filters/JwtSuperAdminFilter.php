@@ -32,6 +32,11 @@ class JwtSuperAdminFilter implements FilterInterface
     // deploy with admin.authBypass=true.
     private function isBypassEnabled(): bool
     {
+        // Never in production, whatever .env says: it makes every caller
+        // the Super Admin.
+        if (ENVIRONMENT === 'production') {
+            return false;
+        }
         return env('admin.authBypass', false) === true || env('admin.authBypass') === 'true';
     }
 
