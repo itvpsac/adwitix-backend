@@ -177,7 +177,7 @@ $routes->get('/browse', 'Home::browse');
 $routes->get('/listings', 'Home::browse');
 // User files (listing media, tenant logos) from persistent storage.
 $routes->get('uploads/(:any)', 'UploadController::serve/$1');
-$routes->get('/api/v1/app/browse', 'Home::browseApi');
+$routes->get('/api/v1/app/browse', 'Home::browseApi', ['filter' => 'publicCache:30']);
 $routes->get('/api/v1/app/admin/audit-log', 'AuditLogController::index', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/audit-log/verify', 'AuditLogController::verifyIntegrity', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/audit-log/export', 'AuditLogController::export', ['filter' => 'jwtSuperAdmin']);
@@ -193,7 +193,7 @@ $routes->get('/ticker-feed', 'LiveTickerController::feed');
 $routes->get('/api/v1/app/admin/tenants/(:segment)', 'TenantController::view/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/edit', 'TenantController::editSubmit/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/delete', 'TenantController::delete/$1', ['filter' => 'jwtSuperAdmin']);
-$routes->get('/api/v1/app/tenants', 'TenantController::directory');
+$routes->get('/api/v1/app/tenants', 'TenantController::directory', ['filter' => 'publicCache:300']);
 
 // AML Monitoring (BR-54/PR-31) — SaaS Admin only
 $routes->get('/api/v1/app/admin/aml', 'AmlController::index', ['filter' => 'jwtSuperAdmin']);
