@@ -26,7 +26,10 @@ class SellerApplicationController extends BaseController
         $tenant = $this->tenantModel->find($tenantId);
         $existing = $this->applicationModel->findForPartyAndTenant($partyId, $tenantId);
 
-        return $this->apiResponse(['tenant' => $tenant, 'existing' => $existing]);
+        // Salvage Managers needs no seller approval (BR-09, D-131).
+        $openSelling = $tenant && \App\Models\TenantModel::isSalvageManagers($tenant);
+        return $this->apiResponse(['tenant' => $tenant, 'existing' => $existing, 'openSelling' => $openSelling,
+            'canSell' => $tenant ? $this->service->isApprovedSeller($partyId, $tenantId) : false]);
     }
 
     public function applySubmit(string $tenantId)

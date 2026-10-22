@@ -72,8 +72,8 @@ class TenantController extends BaseController
     }
 
     // GET /my-seller-tenants (jwtAuth): the TradeSphereX the caller may list
-    // on (approved seller, BR-09), Salvage Managers first, plus Salvage
-    // Managers itself so Create Lot can point an unapproved seller at it.
+    // on — Salvage Managers (open to all, D-131) first, then every TSX they
+    // are an approved seller on (BR-09).
     public function mySellerTenants()
     {
         $partyId = \App\Libraries\UserAuthContext::partyId();
@@ -81,8 +81,13 @@ class TenantController extends BaseController
             ->select('tenant_id')->where('party_id', $partyId)->where('role', 'seller')
             ->where('revoked_at', null)->where('tenant_id IS NOT NULL', null, false)->findAll(), 'tenant_id');
         $cols = 'id, name, subdomain, subscription_tier';
-        $tenants = $ids ? $this->tenantModel->select($cols)->whereIn('id', $ids)->where('suspended_at', null)->salvageManagersFirst()->findAll() : [];
         $sm = $this->tenantModel->select($cols)->where('subscription_tier', TenantModel::SALVAGE_MANAGERS_TIER)->first();
+        // Selling on Salvage Managers needs no approval (D-131), unless the
+        // seller has been suspended there.
+        if ($sm && (new \App\Libraries\SellerApplicationService())->isApprovedSeller($partyId, $sm['id'])) {
+            $ids[] = $sm['id'];
+        }
+        $tenants = $ids ? $this->tenantModel->select($cols)->whereIn('id', array_unique($ids))->where('suspended_at', null)->salvageManagersFirst()->findAll() : [];
         return $this->apiResponse(['tenants' => $tenants, 'salvageManagers' => $sm]);
     }
 

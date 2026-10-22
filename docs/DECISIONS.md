@@ -8809,3 +8809,26 @@ Approved and built:
   - Shown as a Delete button on the TradeSphereX page, so the 8 sample tenants can be removed.
 - **`GET /my-seller-tenants`:** returns the TSXs the caller is an approved seller on, Salvage Managers first. Create Lot now offers only those, defaulting to Salvage Managers. A seller approved on none is sent to Apply to Sell on Salvage Managers. The hard-coded tenant id is gone.
 - **`ADWITIX_Master.docx` is now v3** with the approved text. The glossary now says the General Marketplace is the combined view of every TSX, not a Tenant.
+
+### D-131: Open selling on Salvage Managers
+
+**Decision (project owner):** "At salvage managers the sellers do not need
+approval to allow them to sell, yet the lot is approved like any other
+tsx. At other tsx to become a seller tsx master has to accord approval to
+the seller."
+
+**Built:**
+- **Who may list (`SellerApplicationService::isApprovedSeller()`):**
+  - On Salvage Managers, any caller may list unless its TSX Master has suspended them there.
+  - Every other TSX still needs an active seller role (BR-09).
+  - The KYC (BR-55) and delisting (BR-38) checks in `ListingController::createSubmit` still apply everywhere.
+  - Lot approval (BR-13) is unchanged.
+- **Applications:** `apply()` refuses an application to Salvage Managers, because none is needed.
+- **Suspension on Salvage Managers:** with no application to revoke, `suspendSeller()` records a revoked seller role. `isApprovedSeller()` reads that as suspended, and the BR-09 listing-suspension cascade runs as before.
+- **`GET /my-seller-tenants`:** always includes Salvage Managers unless the caller is suspended there.
+- **`GET /tenants/:id/apply-to-sell`:** returns `openSelling` and `canSell`.
+- **Frontend:**
+  - Apply to Sell shows "No approval needed — List a Lot" for Salvage Managers.
+  - The TradeSphereX Directory card for Salvage Managers says "List a Lot Here" instead of "Apply".
+  - Create Lot offers Salvage Managers to every seller.
+- **`ADWITIX_Master.docx`, BR-09:** adds the Salvage Managers exception.
