@@ -98,3 +98,22 @@ jobs:
           echo "== try mkdir"; d="$DEPLOY_PATH/.deploy-probe-$$"; mkdir "$d" && echo "mkdir ok" && rmdir "$d"
           echo "== mount"; mount 2>/dev/null | grep -E " $(df --output=target "$DEPLOY_PATH" | tail -1) " || true
           REMOTE
+
+      - name: Tenant census (read-only)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          PHP=""
+          for bin in /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /usr/bin/php php; do
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+          done
+          cnf=$(mktemp); trap 'rm -f "$cnf"' EXIT
+          db=$("$PHP" "$DEPLOY_PATH/spark" backup:mysql-config "$cnf" | tail -1)
+          mysql --defaults-extra-file="$cnf" -t "$db" <<'SQL'
+          SELECT t.id, t.name, t.tenant_class, t.subscription_tier, t.subdomain, t.suspended_at,
+                 (SELECT COUNT(*) FROM listing l WHERE l.tenant_id = t.id) AS lots,
+                 (SELECT COUNT(*) FROM listing l WHERE l.tenant_id = t.id AND l.archived_at IS NULL) AS live_lots,
+                 (SELECT COUNT(*) FROM sale_event s WHERE s.tenant_id = t.id) AS sessions,
+                 (SELECT COUNT(*) FROM party_role r WHERE r.tenant_id = t.id) AS roles
+          FROM tenant t ORDER BY t.name;
+          SQL
+          REMOTE
