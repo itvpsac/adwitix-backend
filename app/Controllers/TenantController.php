@@ -20,7 +20,7 @@ class TenantController extends BaseController
         $name = $this->input('name');
         $tenantClass = $this->input('tenant_class') ?: 'general';
         $subdomain = $this->input('subdomain');
-        $subscriptionTier = $this->input('subscription_tier') ?: 'tsx_launch';
+        $subscriptionTier = $this->input('subscription_tier') ?: ($tenantClass === 'company_shop' ? TenantModel::SALVAGE_MANAGERS_TIER : 'tsx_launch');
         if (!in_array($subscriptionTier, TenantModel::SUBSCRIPTION_TIERS, true)) {
             return $this->jsonError(422, 'invalid_tier', 'Invalid subscription tier.');
         }
@@ -117,6 +117,7 @@ class TenantController extends BaseController
         $update = [
             'name' => $this->request->getPost('name') ?: $tenant['name'],
             'subscription_tier' => $subscriptionTier,
+            'tenant_class' => TenantModel::classForTier($subscriptionTier, $tenant['tenant_class']),
             'branding_primary_color' => $postedColor ?: $tenant['branding_primary_color'],
             'terms_url' => $this->request->getPost('terms_url') ?: $tenant['terms_url'],
         ];

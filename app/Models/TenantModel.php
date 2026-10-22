@@ -30,13 +30,36 @@ class TenantModel extends Model
     {
         $id = \App\Libraries\Uuid::v4();
         $data['id'] = $id;
+        // Salvage Managers is both the CoCo plan and the Company Shop class
+        // (BR-12, D-130): either one implies the other.
+        if (($data['tenant_class'] ?? null) === 'company_shop' && empty($data['subscription_tier'])) {
+            $data['subscription_tier'] = self::SALVAGE_MANAGERS_TIER;
+        }
+        $data['subscription_tier'] = $data['subscription_tier'] ?? 'tsx_launch';
+        $data['tenant_class'] = self::classForTier($data['subscription_tier'], $data['tenant_class'] ?? 'general');
         $this->insert($data);
         return $this->find($id);
     }
 
     // The CoCo tier is "Salvage Managers": the one company-owned
-    // TradeSphereX. There is only ever one, and it leads every list.
+    // TradeSphereX (BR-12's Company Shop, D-130). There is only ever one,
+    // it alone runs Tender Auctions, and it leads every list.
     public const SALVAGE_MANAGERS_TIER = 'coco_starter';
+
+    public static function isSalvageManagers(?array $tenant): bool
+    {
+        return $tenant !== null && ($tenant['subscription_tier'] ?? null) === self::SALVAGE_MANAGERS_TIER;
+    }
+
+    // The tenant_class that goes with a plan: Company Shop for Salvage
+    // Managers only; any other plan can't keep the Company Shop class.
+    public static function classForTier(string $tier, string $class): string
+    {
+        if ($tier === self::SALVAGE_MANAGERS_TIER) {
+            return 'company_shop';
+        }
+        return $class === 'company_shop' ? 'general' : $class;
+    }
 
     // Every TradeSphereX, Salvage Managers first, then by name.
     public function salvageManagersFirst(): self

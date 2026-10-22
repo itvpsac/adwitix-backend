@@ -8754,3 +8754,36 @@ against, not just an empty state. The complete 39-suite `test:*`
 regression was re-run from a **separate, freshly-migrated database**
 (not the seeded one) immediately afterward and passed clean, 39/39 —
 confirming this new command has no effect on the existing test suite.
+
+### D-130: Salvage Managers is the one CoCo TradeSphereX
+
+**Decision (project owner):** "There will only be one COCO tenant and
+that is Salvage Managers." BR-12 already names Salvage Managers as the
+Company Shop, the only TSX allowed to run Tender Auctions. The code,
+though, marked it in two unrelated places:
+- Tender access checked `tenant_class = company_shop`.
+- CoCo checked `subscription_tier = coco_starter`.
+
+`subscription_tier` also defaulted to `coco_starter`, so every TSX
+created without a plan became CoCo. That is how production ended up with
+two: "General Marketplace" and "Salvage Managers".
+
+**Built:**
+- **Single source of truth:** `TenantModel::isSalvageManagers()` and `classForTier()`.
+  - The CoCo plan always carries the Company Shop class, and any other plan drops it.
+  - This holds on create (`createTenant`) and on edit (`TenantController::editSubmit`).
+- **Tender gate:** `TenderService::validateCompanyShopOnly` now checks `isSalvageManagers()`.
+- **One holder only:** a second CoCo TSX is refused with a 409, on create and on edit.
+- **Ordering:** every tenant list sorts Salvage Managers first (`salvageManagersFirst()`).
+- **Defaults:** new tenants default to `tsx_launch`, in the API and in the column (migration 000074).
+- **Data fix (migration 000074):** if a TSX named "Salvage Managers" holds CoCo, every other CoCo TSX moves to `tsx_launch`. Class then follows plan.
+- **Pricing pages** (React `Pricing.jsx` and `public/pricing.html`) now show "Salvage Managers" in place of "CoCo Starter", with the proposed allowances.
+
+**Rule text:** drafted in `docs/drafts/D-130_Salvage_Managers_rule_change.md`
+for the project owner's approval before `ADWITIX_Master.docx` is amended.
+- Section 6.5 gives Salvage Managers Enterprise-level storage and retention.
+- Buyer-Pays only is unchanged.
+
+**Verified:**
+- The migration ran against a production-like duplicate (two CoCo tenants).
+- `test:tenderfoundation` (14), `test:tenderreview` (21), `test:tenderbidding` (14), `test:tenantapi` (25) and `test:successfee` (25) all pass on a clean schema copy.
