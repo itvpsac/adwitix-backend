@@ -113,6 +113,10 @@ class BidController extends BaseController
     {
         $bidderId = UserAuthContext::partyId();
 
+        if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($bidderId)) {
+            return $this->jsonError(403, 'br15_super_admin_barred', 'BR-15: the Super Admin holds a non-participatory regulatory role and may never bid, offer or pledge.');
+        }
+
         $saleEvent = $this->saleEventModel->find($saleEventId);
         $amount = (float) $this->input('amount');
 

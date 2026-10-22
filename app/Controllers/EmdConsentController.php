@@ -24,11 +24,15 @@ class EmdConsentController extends BaseController
             return $this->jsonError(404, 'not_found', 'Sale event not found.');
         }
 
-        $baseline = EmdService::calculateBaselineEmd(
-            $saleEvent['sale_format'],
-            $saleEvent['expected_value'] !== null ? (float) $saleEvent['expected_value'] : null,
-            $saleEvent['reserve_value'] !== null ? (float) $saleEvent['reserve_value'] : null
-        );
+        try {
+            $baseline = EmdService::calculateBaselineEmd(
+                $saleEvent['sale_format'],
+                $saleEvent['expected_value'] !== null ? (float) $saleEvent['expected_value'] : null,
+                $saleEvent['reserve_value'] !== null ? (float) $saleEvent['reserve_value'] : null
+            );
+        } catch (\RuntimeException $e) {
+            return $this->jsonError(422, 'emd_unavailable', $e->getMessage());
+        }
 
         return $this->apiResponse(['saleEvent' => $saleEvent, 'amount' => $baseline, 'action' => $action]);
     }

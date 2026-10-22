@@ -26,6 +26,15 @@ class SettlementController extends BaseController
         if (!$s) {
             return $this->jsonError(404, 'not_found', 'Settlement not found.');
         }
+        // Only the buyer, the seller, the sale's tenant admin or the Super
+        // Admin may see a settlement; anyone else gets the same 404.
+        $partyId = UserAuthContext::partyId();
+        $authz = new \App\Libraries\AuthorizationService();
+        if (!in_array($partyId, [$s['buyer_party_id'], $s['seller_party_id']], true)
+            && !$authz->isSuperAdmin($partyId)
+            && !$authz->isTenantAdminForSaleEvent($partyId, $s['sale_event_id'])) {
+            return $this->jsonError(404, 'not_found', 'Settlement not found.');
+        }
         $saleEvent = $this->saleEventModel->find($s['sale_event_id']);
         $invoices = (new \App\Libraries\InvoiceService())->findForSettlement($settlementId);
         $chronicle = (new \App\Libraries\ChronicleService())->findForSaleEvent($s['sale_event_id']);
