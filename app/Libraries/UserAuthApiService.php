@@ -366,6 +366,8 @@ class UserAuthApiService
             'entity_type' => $party['entity_type'] ?? null,
             'kyc_status' => $party['kyc_status'] ?? null,
             'created_at' => $party['created_at'] ?? null,
+            // BR-51(d), D-137: documents they must (re-)accept before further use.
+            'pendingAcceptances' => (new LegalDocumentService())->pendingAcceptances($party['id']),
             'roles' => $roles,
             'admin_tenants' => $adminTenants,
         ];

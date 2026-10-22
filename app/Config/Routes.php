@@ -194,6 +194,17 @@ $routes->get('/api/v1/app/admin/tenants/(:segment)', 'TenantController::view/$1'
 $routes->post('/api/v1/app/admin/tenants/(:segment)/edit', 'TenantController::editSubmit/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/delete', 'TenantController::delete/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/tenants', 'TenantController::directory', ['filter' => 'publicCache:300']);
+// D-137: published legal/help documents, the Custodian's Documents page,
+// and users' acceptance of material changes (BR-51).
+$routes->get('/api/v1/app/legal/(:segment)', 'LegalDocumentController::show/$1', ['filter' => 'publicCache:300']);
+$routes->get('/api/v1/app/admin/legal', 'LegalDocumentController::index', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/legal/(:segment)', 'LegalDocumentController::detail/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/legal/(:segment)/versions/(:num)', 'LegalDocumentController::version/$1/$2', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/draft', 'LegalDocumentController::saveDraft/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/publish', 'LegalDocumentController::publish/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/discard-draft', 'LegalDocumentController::discardDraft/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/restore/(:num)', 'LegalDocumentController::restore/$1/$2', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/me/accept-documents', 'LegalDocumentController::accept', ['filter' => 'jwtAuth']);
 
 // AML Monitoring (BR-54/PR-31) — SaaS Admin only
 $routes->get('/api/v1/app/admin/aml', 'AmlController::index', ['filter' => 'jwtSuperAdmin']);

@@ -8962,3 +8962,45 @@ Discussed against the rules first, then confirmed:
   - `/kyc-queue` now opens the Users list filtered to submitted KYC.
   - Decision Queue KYC items link into the User file.
 - **Chargeback Handling** shows only the Custodian view, and says "Custodian" where it said "SaaS Admin". It was the only Custodian page with such a toggle.
+
+### D-137: Documents — versioned legal and help pages, managed by the Custodian
+
+**Decision (project owner):** "I want a page where we can check and manage the standard published documents in legal and help pages." All three recommendations were agreed:
+1. A simple formatted editor, not raw HTML.
+2. Pricing left out for now.
+3. The Custodian alone publishes; the lawyer reviews offline.
+
+**Built:**
+- **Storage (migration 000076):**
+  - `legal_document` holds slug, title, kind, category, path, requires_consent and consent_version.
+  - `legal_document_version` keeps every version. Each is a draft, published or superseded, stores its content as JSON, and records effective date, material flag, change note, and who created and published it, and when.
+- **The 11 documents:**
+  - Legal: Terms of Usage, Privacy, Cookies, Refund, Grievance, Dispute Resolution, and the Terms & Privacy summary.
+  - Help: FAQ, Terminology, Do's & Don'ts, Security & Trust.
+  - Version 1 of each is the text the site already showed (`app/Database/Seeds/legal_documents_v1.json`, generated from the pages themselves).
+  - Verified: all 11 public pages render identical text from published v1 and from their built-in text.
+- **`LegalDocumentService`:**
+  - **Schemas:** one per kind (sections, faq, terminology, dosdonts, pillars). The same schema drives the console's form editor and the server-side sanitiser.
+  - **Sanitiser:** keeps p, br, strong/b, em/i, u, ul/ol/li, h3/h4, tables, and links to http(s), mailto, site paths or #anchors only. All other attributes are dropped; scripts, iframes and the like are removed with their content.
+  - **Pre-publish checks:** empty required fields are errors that block publishing. Retired terms (CoCo Starter, SaaS Admin, eBid, General Marketplace as a TSX) and placeholders (TODO, TBD, lorem, `[insert`) are warnings.
+  - **Lifecycle:** draft, publish, discard draft, and restore an old version into a draft. Each step is logged in the audit chain.
+- **BR-51:**
+  - A material publish of a requires_consent document (Terms of Usage, Privacy Policy) sets `consent_version`.
+  - `/auth/me` returns `pendingAcceptances`. The frontend `AcceptanceGate` asks the user to read and accept, and acceptance is recorded as `consent_event` type `document_acceptance` with `terms_version "<slug>@v<n>"`.
+  - `BaseController::refuseIfFrozen()` also returns 403 `acceptance_required` on bid, offer, pledge, listing and session creation until the user accepts.
+  - The Custodian is never asked.
+  - Gap closed: registration consent (BR-51(a)) was never actually recorded, so every existing user is asked to accept the current Terms and Privacy Policy once.
+- **Endpoints:**
+  - Public: `GET /legal/:slug`, cached for 300 s.
+  - Custodian: `/admin/legal` list and detail, plus versions, draft, publish, discard-draft and restore.
+  - User: `POST /me/accept-documents`.
+- **Frontend:**
+  - Public pages read published content through `usePublishedContent`, falling back to the built-in text while loading or if the request fails.
+  - **Custodian → Governance → Documents** has a list with live version, effective date, draft, checks and acceptance counts. Each document has an editor driven by its schema, with formatting buttons, reorderable sections and items, effective date, change note and the material flag.
+  - **Preview** renders the real public page with the draft content.
+  - **Changes vs live** compares field by field.
+  - **History** lets you view, compare and restore any version.
+
+**Found on the live content by the first run of the checks** (left for the project owner to fix through the page):
+- The Terms of Usage §8 says disputes go to "the courts at [city — TODO]".
+- Terminology still says "SaaS Admin" in two places.
