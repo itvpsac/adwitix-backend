@@ -78,6 +78,27 @@ class TenantModel extends Model
         return $builder->first();
     }
 
+    // Rows in every table that points at this tenant (tenant_id foreign
+    // keys), by table — only counts above zero. A TSX can be deleted only
+    // when this is empty.
+    public function referenceCounts(string $tenantId): array
+    {
+        $db = $this->db;
+        $tables = array_column($db->query(
+            "SELECT DISTINCT TABLE_NAME AS t FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tenant'
+               AND REFERENCED_COLUMN_NAME = 'id' AND COLUMN_NAME = 'tenant_id'"
+        )->getResultArray(), 't');
+        $counts = [];
+        foreach ($tables as $table) {
+            $n = $db->table($table)->where('tenant_id', $tenantId)->countAllResults();
+            if ($n > 0) {
+                $counts[$table] = $n;
+            }
+        }
+        return $counts;
+    }
+
     // BR-66: API availability is a package feature that varies by tier —
     // CoCo Starter has none, TSX Launch is read-only, TSX Growth adds
     // listing push, TSX Enterprise adds Sale System push too.

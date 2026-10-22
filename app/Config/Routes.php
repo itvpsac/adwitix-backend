@@ -112,6 +112,7 @@ $routes->get('/api/v1/app/my-sales', 'MyActivityController::mySales', ['filter' 
 $routes->get('/api/v1/app/my-sales/export', 'MyActivityController::mySalesExport', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-messages', 'MyActivityController::messages', ['filter' => 'jwtAuth']);
 $routes->post('/api/v1/app/my-messages/(:segment)/read', 'MyActivityController::markMessageRead/$1', ['filter' => 'jwtAuth']);
+$routes->get('/api/v1/app/my-seller-tenants', 'TenantController::mySellerTenants', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-star-ratings', 'MyActivityController::starRatings', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-rating-history', 'MyActivityController::ratingHistory', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-buyer-dashboard', 'MyActivityController::buyerDashboard', ['filter' => 'jwtAuth']);
@@ -185,6 +186,7 @@ $routes->post('/api/v1/app/admin/standing-review/(:segment)/rule', 'StandingRevi
 $routes->get('/ticker-feed', 'LiveTickerController::feed');
 $routes->get('/api/v1/app/admin/tenants/(:segment)', 'TenantController::view/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/edit', 'TenantController::editSubmit/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/tenants/(:segment)/delete', 'TenantController::delete/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/tenants', 'TenantController::directory');
 
 // AML Monitoring (BR-54/PR-31) — SaaS Admin only

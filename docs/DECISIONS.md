@@ -8787,3 +8787,25 @@ for the project owner's approval before `ADWITIX_Master.docx` is amended.
 **Verified:**
 - The migration ran against a production-like duplicate (two CoCo tenants).
 - `test:tenderfoundation` (14), `test:tenderreview` (21), `test:tenderbidding` (14), `test:tenantapi` (25) and `test:successfee` (25) all pass on a clean schema copy.
+
+**D-130 addendum: General Marketplace is not a tenant.** The project owner:
+"General market place is the place where lots from every TSX are
+shown … It is not a tsx." A read-only census of production (new
+`diagnose.yml` step) found a "General Marketplace" tenant row holding
+all 7 Lots and 1 role. Create Lot had a hard-coded tenant id that
+pointed at it. Salvage Managers had nothing, at subdomain
+`pune-business`, and 8 other tenants had no records.
+
+Approved and built:
+- **Migration 000074 (rewritten, not yet deployed):**
+  - Moves every row that references the General Marketplace tenant to Salvage Managers. This covers every table with a `tenant_id` foreign key: Lots, sessions, roles, applications, ledgers and invoices.
+  - Logs `tenant.merged_into_salvage_managers` in the audit chain with the per-table counts, then deletes the empty row.
+  - Gives Salvage Managers the subdomain `salvage-managers`, the CoCo plan and the Company Shop class.
+  - Takes CoCo and Company Shop off every other TSX.
+- **`POST /admin/tenants/:id/delete`** (Custodian):
+  - Refused for Salvage Managers.
+  - Refused for any TSX that still has rows in a table pointing at it; the refusal says which tables.
+  - Logged as `tenant.deleted`.
+  - Shown as a Delete button on the TradeSphereX page, so the 8 sample tenants can be removed.
+- **`GET /my-seller-tenants`:** returns the TSXs the caller is an approved seller on, Salvage Managers first. Create Lot now offers only those, defaulting to Salvage Managers. A seller approved on none is sent to Apply to Sell on Salvage Managers. The hard-coded tenant id is gone.
+- **`ADWITIX_Master.docx` is now v3** with the approved text. The glossary now says the General Marketplace is the combined view of every TSX, not a Tenant.

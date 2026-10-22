@@ -47,6 +47,45 @@ class TenantController extends BaseController
         return $this->apiResponse(['tenant' => $tenant, 'message' => "Tenant \"{$tenant['name']}\" whitelisted successfully."], null, 201);
     }
 
+    // POST /admin/tenants/:id/delete (jwtSuperAdmin). Only a TSX with
+    // nothing on it — no Lots, sessions, roles, applications, invoices… —
+    // and never Salvage Managers. Logged in the audit chain.
+    public function delete(string $tenantId)
+    {
+        $tenant = $this->tenantModel->find($tenantId);
+        if (!$tenant) {
+            return $this->jsonError(404, 'not_found', 'Tenant not found.');
+        }
+        if (TenantModel::isSalvageManagers($tenant)) {
+            return $this->jsonError(409, 'salvage_managers', 'Salvage Managers is the platform\'s own TradeSphereX and cannot be deleted.');
+        }
+        $refs = $this->tenantModel->referenceCounts($tenantId);
+        if ($refs) {
+            $what = implode(', ', array_map(fn($t, $n) => str_replace('_', ' ', $t) . " ({$n})", array_keys($refs), $refs));
+            return $this->jsonError(409, 'tenant_in_use', "\"{$tenant['name']}\" still has records ({$what}), so it can't be deleted.");
+        }
+        $this->tenantModel->delete($tenantId);
+        (new \App\Libraries\AuditLogService())->log('tenant.deleted', \App\Libraries\UserAuthContext::partyId(), [
+            'tenantId' => $tenantId, 'name' => $tenant['name'], 'subdomain' => $tenant['subdomain'],
+        ]);
+        return $this->apiResponse(['message' => "\"{$tenant['name']}\" deleted."]);
+    }
+
+    // GET /my-seller-tenants (jwtAuth): the TradeSphereX the caller may list
+    // on (approved seller, BR-09), Salvage Managers first, plus Salvage
+    // Managers itself so Create Lot can point an unapproved seller at it.
+    public function mySellerTenants()
+    {
+        $partyId = \App\Libraries\UserAuthContext::partyId();
+        $ids = array_column((new \App\Models\PartyRoleModel())
+            ->select('tenant_id')->where('party_id', $partyId)->where('role', 'seller')
+            ->where('revoked_at', null)->where('tenant_id IS NOT NULL', null, false)->findAll(), 'tenant_id');
+        $cols = 'id, name, subdomain, subscription_tier';
+        $tenants = $ids ? $this->tenantModel->select($cols)->whereIn('id', $ids)->where('suspended_at', null)->salvageManagersFirst()->findAll() : [];
+        $sm = $this->tenantModel->select($cols)->where('subscription_tier', TenantModel::SALVAGE_MANAGERS_TIER)->first();
+        return $this->apiResponse(['tenants' => $tenants, 'salvageManagers' => $sm]);
+    }
+
     // jwtSuperAdmin-gated.
     public function list()
     {
