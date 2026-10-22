@@ -20,9 +20,12 @@ class TenantController extends BaseController
         $name = $this->input('name');
         $tenantClass = $this->input('tenant_class') ?: 'general';
         $subdomain = $this->input('subdomain');
-        $subscriptionTier = $this->input('subscription_tier') ?: 'coco_starter';
+        $subscriptionTier = $this->input('subscription_tier') ?: 'tsx_launch';
         if (!in_array($subscriptionTier, TenantModel::SUBSCRIPTION_TIERS, true)) {
             return $this->jsonError(422, 'invalid_tier', 'Invalid subscription tier.');
+        }
+        if ($subscriptionTier === TenantModel::SALVAGE_MANAGERS_TIER && ($existing = $this->tenantModel->salvageManagers())) {
+            return $this->jsonError(409, 'salvage_managers_exists', "There is only one Salvage Managers — it is already \"{$existing['name']}\".");
         }
         // BR-06: "a dedicated subdomain ... or custom domain" — optional,
         // set once at whitelisting time like subdomain itself.
@@ -48,7 +51,7 @@ class TenantController extends BaseController
     public function list()
     {
         $q = trim((string) $this->request->getGet('q'));
-        $builder = $this->tenantModel->orderBy('name', 'ASC');
+        $builder = $this->tenantModel->salvageManagersFirst();
         if ($q !== '') {
             $builder = $builder->groupStart()->like('name', $q)->orLike('subdomain', $q)->groupEnd();
         }
@@ -107,6 +110,9 @@ class TenantController extends BaseController
         if (!in_array($subscriptionTier, TenantModel::SUBSCRIPTION_TIERS, true)) {
             return $this->jsonError(422, 'invalid_tier', 'Invalid subscription tier.');
         }
+        if ($subscriptionTier === TenantModel::SALVAGE_MANAGERS_TIER && ($existing = (new TenantModel())->salvageManagers($tenantId))) {
+            return $this->jsonError(409, 'salvage_managers_exists', "There is only one Salvage Managers — it is already \"{$existing['name']}\".");
+        }
 
         $update = [
             'name' => $this->request->getPost('name') ?: $tenant['name'],
@@ -140,7 +146,7 @@ class TenantController extends BaseController
         $tenants = $this->tenantModel
             ->select('id, name, tenant_class, subdomain, custom_domain, subscription_tier, branding_primary_color')
             ->where('suspended_at', null)
-            ->orderBy('name', 'ASC')->findAll();
+            ->salvageManagersFirst()->findAll();
         return $this->apiResponse(['tenants' => $tenants]);
     }
 }

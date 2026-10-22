@@ -34,6 +34,27 @@ class TenantModel extends Model
         return $this->find($id);
     }
 
+    // The CoCo tier is "Salvage Managers": the one company-owned
+    // TradeSphereX. There is only ever one, and it leads every list.
+    public const SALVAGE_MANAGERS_TIER = 'coco_starter';
+
+    // Every TradeSphereX, Salvage Managers first, then by name.
+    public function salvageManagersFirst(): self
+    {
+        return $this->orderBy("subscription_tier = '" . self::SALVAGE_MANAGERS_TIER . "'", 'DESC', false)
+            ->orderBy('name', 'ASC');
+    }
+
+    // The Salvage Managers TradeSphereX other than $exceptId, if any.
+    public function salvageManagers(?string $exceptId = null): ?array
+    {
+        $builder = $this->where('subscription_tier', self::SALVAGE_MANAGERS_TIER);
+        if ($exceptId !== null) {
+            $builder->where('id !=', $exceptId);
+        }
+        return $builder->first();
+    }
+
     // BR-66: API availability is a package feature that varies by tier —
     // CoCo Starter has none, TSX Launch is read-only, TSX Growth adds
     // listing push, TSX Enterprise adds Sale System push too.

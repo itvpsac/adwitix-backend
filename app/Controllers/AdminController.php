@@ -67,7 +67,7 @@ class AdminController extends BaseController
             ->get()->getResultArray();
 
         return $this->apiResponse([
-            'tenants' => $tenantModel->findAll(),
+            'tenants' => $tenantModel->salvageManagersFirst()->findAll(),
             'openDisputes' => $disputeModel->whereIn('status', ['filed', 'evidence_window', 'appealed'])->countAllResults(),
             'stalledSettlements' => $settlementModel->where('status', 'stalled')->countAllResults(),
             'openAmlFlags' => $amlFlagModel->where('status', 'open')->countAllResults(),
@@ -146,7 +146,7 @@ class AdminController extends BaseController
         $qOrNull = $q !== '' ? $q : null;
         $total = $svc->countListings($qOrNull, $tenantId, $format, $status);
         $listings = $svc->findListings($qOrNull, $tenantId, $format, $status, $pg['perPage'], $pg['offset']);
-        $tenants = (new TenantModel())->orderBy('name', 'ASC')->findAll();
+        $tenants = (new TenantModel())->salvageManagersFirst()->findAll();
 
         return $this->apiResponse([
             'listings' => $listings, 'tenants' => $tenants,
@@ -168,7 +168,7 @@ class AdminController extends BaseController
         $svc = new \App\Libraries\AdminDirectoryService();
         $total = $svc->countSaleEvents($tenantId, $format, $status);
         $saleEvents = $svc->findSaleEvents($tenantId, $format, $status, $pg['perPage'], $pg['offset']);
-        $tenants = (new TenantModel())->orderBy('name', 'ASC')->findAll();
+        $tenants = (new TenantModel())->salvageManagersFirst()->findAll();
 
         return $this->apiResponse([
             'saleEvents' => $saleEvents, 'tenants' => $tenants,
