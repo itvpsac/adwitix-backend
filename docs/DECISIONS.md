@@ -8928,3 +8928,37 @@ Discussed against the rules first, then confirmed:
 - Unfreeze restores access; freezing the Custodian is refused.
 - Non-Custodians get 403 on the dossier.
 - The bidding, Express, Buy-Now, cascade, schedule, Tender, lifecycle and KYC suites (133 assertions) all pass.
+
+### D-135: Load speed
+
+**Measured on production** (read-only diagnose run, 22 Oct 2026):
+- Every request to admin.adwitix.com waits about 0.35 s for its first byte. A 5 KB static `favicon.ico` waits the same, so PHP and the database are not the cause.
+- Hostinger's own `x-hcdn-upstream-rt` header reports about 0.25 s from their CDN to the hosting origin.
+- The app runs in production mode with OPcache on.
+- Vercel serves the frontend in 0.03–0.10 s.
+
+**Main fix (project owner, in hPanel):** check the plan's server location and move the hosting to India.
+
+**Built:**
+- **Short caching for public data (`PublicCache` filter):** applies only to anonymous 200 responses with no Authorization header. The tenant list is cached for 300 s and marketplace browse for 30 s. CodeIgniter's default no-store is replaced, and `Vary: Origin, Authorization` is set. Lot detail stays uncached because it records views.
+- **Frontend code splitting:** every route page loads on demand through `lazyPage`, which reloads once if a stale chunk is missing after a deploy. Initial JS went from 873 KB to 328 KB (249 KB to 102 KB gzip) and initial CSS from 226 KB to 28 KB.
+- **Smaller fixes:**
+  - `/assets/*` are served as immutable for one year (vercel.json).
+  - Preconnects to fonts.gstatic.com and admin.adwitix.com.
+  - Real page title and description.
+
+### D-136: KYC review inside the User file; Custodian-only views
+
+**Decision (project owner):**
+- "The custodian does not need to see KYC review separately — it should be sitting within each user detail or data page."
+- "There should be only the custodian view here in the custodian panel" (the Chargeback page had a SaaS Admin / Buyer-Seller toggle).
+
+**Built:**
+- **KYC in the User file:** the file now carries a KYC review panel (`KycReviewPanel.jsx`). It shows status and reason, offers "Mark verified" on each compliance check (PAN, GSTIN, Aadhaar, bank, email), lists document downloads, and has Verify / Suspend with the BR-17 closed-list reason.
+  - Verify and Suspend are offered only for a submitted dossier, as `KycService::reviewDossier` requires.
+  - A banner flags a dossier that is waiting for review.
+- **No separate KYC screen:**
+  - The "KYC Review" menu item and the `KycQueue` page are removed.
+  - `/kyc-queue` now opens the Users list filtered to submitted KYC.
+  - Decision Queue KYC items link into the User file.
+- **Chargeback Handling** shows only the Custodian view, and says "Custodian" where it said "SaaS Admin". It was the only Custodian page with such a toggle.
