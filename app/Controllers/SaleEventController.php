@@ -215,6 +215,10 @@ class SaleEventController extends BaseController
         if (!$saleEvent || $saleEvent['sale_format'] !== 'express') {
             return $this->jsonError(404, 'not_found', 'Sale event not found.');
         }
+        $listing = (new \App\Models\ListingModel())->find($saleEvent['listing_id']);
+        if (!$listing || $listing['seller_party_id'] !== $sellerId) {
+            return $this->jsonError(403, 'forbidden', 'Only the seller of this lot can complete its defect disclosure.');
+        }
 
         $this->saleEventModel->update($saleEventId, [
             'defect_disclosure_known_damage' => $this->input('known_damage') ?: 'None disclosed.',
