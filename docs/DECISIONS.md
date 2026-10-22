@@ -8861,3 +8861,26 @@ switch makes every caller the Super Admin. It is now ignored whenever
 `CI_ENVIRONMENT` is production, in both `JwtSuperAdminFilter` and
 `devBypassLogin`. `diagnose.yml` now checks it. On 22 Oct 2026 production
 answered 401 to an anonymous admin call, so the switch was off there.
+
+### D-133: Nothing about a Lot is hidden from the Custodian
+
+**Decision (project owner):** "custodian needs to see everything about
+every lot and event - dont hide anything from custodian". Prompted by Lot
+Detail showing the Custodian "Identity not disclosed" for the seller.
+
+**Built:**
+- **`GET /admin/listings/:id/dossier`** (jwtSuperAdmin) returns everything about one Lot:
+  - every column of the Lot, archived or not, plus its other versions;
+  - the TradeSphereX and its TSX Masters;
+  - full party rows for the seller and everyone else the file mentions (bidders, buyers, depositors, dispute parties, the inspector);
+  - all media;
+  - every Trading Session (all columns, reserve value included), each with its bids, offers, EMD holds, Tender interest, settlement, disputes and chronicle references;
+  - engagement: views, unique viewers, favourites and seller messages;
+  - every audit-chain entry whose payload names the Lot or any of its sessions.
+- **Credentials:** `ApiResponse` still strips credential columns (mpin_hash, totp_secret and the like). Verified that none appear.
+- **Lot file page (`/custodian/lot?id=`):**
+  - Lists every stored field generically, so a new column appears without a code change. Empty fields sit behind "Show N empty fields".
+  - Has Stop Lot and Stop session buttons (D-132).
+- **Links into the Lot file:**
+  - The Lot Directory row title and the Trading Session Directory ERN open it, at that session.
+  - For the Custodian only, Lot Detail now names the seller and links to the file. Buyers still see "Identity not disclosed" (verified).

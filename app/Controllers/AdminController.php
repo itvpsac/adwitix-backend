@@ -243,6 +243,85 @@ class AdminController extends BaseController
             'message' => 'Lot stopped' . ($stopped ? ' and its live Trading Session cancelled.' : '.')]);
     }
 
+    // GET /admin/listings/:id/dossier (D-133): everything about one Lot for
+    // the Custodian — nothing withheld. The Lot (archived or not) and the
+    // versions it superseded or was superseded by, its seller, TradeSphereX
+    // and TSX Masters, media, every Trading Session with its bids, offers,
+    // deposits, Tender interest, settlement, disputes and chronicle, the
+    // engagement figures, and every audit-chain entry that names it.
+    public function lotDossier(string $listingId)
+    {
+        $db = \Config\Database::connect();
+        $listing = $db->table('listing')->where('id', $listingId)->get()->getRowArray();
+        if (!$listing) {
+            return $this->jsonError(404, 'not_found', 'Lot not found.');
+        }
+        // Whole party rows: the Custodian sees everything. ApiResponse still
+        // strips credential columns (mpin_hash, totp_secret, …).
+        $partyCols = '*';
+        $rows = fn($table, $col, $ids, $order) => $ids ? $db->table($table)->whereIn($col, $ids)->orderBy($order, 'ASC')->get()->getResultArray() : [];
+
+        $sessions = $db->table('sale_event')->where('listing_id', $listingId)->orderBy('created_at', 'ASC')->get()->getResultArray();
+        $seIds = array_column($sessions, 'id');
+        $bids = $rows('bid', 'sale_event_id', $seIds, 'placed_at');
+        $offers = $rows('offer', 'sale_event_id', $seIds, 'created_at');
+        $holds = $rows('emd_hold', 'sale_event_id', $seIds, 'held_at');
+        $interest = $rows('tender_interest', 'sale_event_id', $seIds, 'registered_at');
+        $settlements = $rows('settlement', 'sale_event_id', $seIds, 'created_at');
+        $disputes = $rows('dispute', 'sale_event_id', $seIds, 'created_at');
+        $chronicles = $seIds ? $db->table('trading_session_chronicle')->select('id, sale_event_id, settlement_id, reference_number, version, superseded_by_chronicle_id, generated_at')
+            ->whereIn('sale_event_id', $seIds)->orderBy('generated_at', 'ASC')->get()->getResultArray() : [];
+
+        $byEvent = fn(array $list) => array_reduce($list, function ($acc, $r) { $acc[$r['sale_event_id']][] = $r; return $acc; }, []);
+        [$bidsBy, $offersBy, $holdsBy, $interestBy, $settleBy, $disputeBy, $chronBy] = array_map($byEvent, [$bids, $offers, $holds, $interest, $settlements, $disputes, $chronicles]);
+        foreach ($sessions as &$se) {
+            $id = $se['id'];
+            $se += ['bids' => $bidsBy[$id] ?? [], 'offers' => $offersBy[$id] ?? [], 'emdHolds' => $holdsBy[$id] ?? [],
+                'tenderInterest' => $interestBy[$id] ?? [], 'settlements' => $settleBy[$id] ?? [], 'disputes' => $disputeBy[$id] ?? [], 'chronicles' => $chronBy[$id] ?? []];
+        }
+        unset($se);
+
+        // Everyone the file mentions, by id, so the page can name them.
+        $partyIds = array_merge([$listing['seller_party_id']],
+            array_column($bids, 'bidder_party_id'), array_column($offers, 'buyer_party_id'), array_column($holds, 'party_id'),
+            array_column($interest, 'party_id'), array_column($settlements, 'buyer_party_id'),
+            array_column($disputes, 'filed_by_party_id'), array_column($disputes, 'respondent_party_id'), array_column($disputes, 'ruled_by_party_id'));
+        if (!empty($listing['inspector_party_id'])) {
+            $partyIds[] = $listing['inspector_party_id'];
+        }
+        $tenant = $db->table('tenant')->select('id, name, tenant_class, subscription_tier, subdomain, custom_domain, suspended_at')->where('id', $listing['tenant_id'])->get()->getRowArray();
+        $masters = $db->table('party_role r')->select('p.id, p.full_name, p.mobile_number')->join('party p', 'p.id = r.party_id')
+            ->where('r.tenant_id', $listing['tenant_id'])->where('r.role', 'tenant_admin')->where('r.revoked_at', null)->get()->getResultArray();
+        $partyIds = array_values(array_unique(array_filter($partyIds)));
+        $parties = $partyIds ? array_column($db->table('party')->select($partyCols)->whereIn('id', $partyIds)->get()->getResultArray(), null, 'id') : [];
+
+        $versions = $db->table('listing')->select('id, title, status, archived_at, superseded_by_listing_id, created_at')
+            ->groupStart()->where('superseded_by_listing_id', $listingId)->orWhere('id', $listing['superseded_by_listing_id'] ?? '')->groupEnd()
+            ->get()->getResultArray();
+
+        $audit = $db->table('audit_log al')->select('al.sequence_number, al.occurred_at, al.event_type, al.actor_party_id, p.full_name AS actor_name, p.mobile_number AS actor_mobile, al.ip_address, al.payload')
+            ->join('party p', 'p.id = al.actor_party_id', 'left')
+            ->groupStart()->like('al.payload', $listingId);
+        foreach ($seIds as $id) {
+            $audit->orLike('al.payload', $id);
+        }
+        $audit = $audit->groupEnd()->orderBy('al.sequence_number', 'ASC')->limit(500)->get()->getResultArray();
+
+        return $this->apiResponse([
+            'listing' => $listing, 'tenant' => $tenant, 'tsxMasters' => $masters,
+            'seller' => $parties[$listing['seller_party_id']] ?? null, 'parties' => $parties,
+            'media' => $db->table('listing_media')->where('listing_id', $listingId)->get()->getResultArray(),
+            'versions' => $versions, 'sessions' => $sessions,
+            'engagement' => [
+                'views' => $db->table('listing_view')->where('listing_id', $listingId)->countAllResults(),
+                'uniqueViewers' => (int) ($db->query('SELECT COUNT(DISTINCT party_id) AS n FROM listing_view WHERE listing_id = ?', [$listingId])->getRowArray()['n'] ?? 0),
+                'favorites' => $db->table('listing_favorite')->where('listing_id', $listingId)->countAllResults(),
+                'sellerMessages' => $db->table('seller_message')->where('listing_id', $listingId)->orderBy('created_at', 'ASC')->get()->getResultArray(),
+            ],
+            'audit' => $audit,
+        ]);
+    }
+
     public function decisionQueue()
     {
         $db = \Config\Database::connect();

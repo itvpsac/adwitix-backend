@@ -27,7 +27,7 @@ class AdminDirectoryService
     {
         $db = \Config\Database::connect();
         $builder = $db->table('listing l')
-            ->select('l.id, l.category, l.subcategory, l.status, l.view_count, l.created_at,
+            ->select('l.id, l.title, l.category, l.subcategory, l.status, l.view_count, l.created_at,
                       t.id as tenant_id, t.name as tenant_name,
                       se.id as sale_event_id, se.sale_format, se.status as sale_status')
             ->join('tenant t', 't.id = l.tenant_id')
@@ -57,7 +57,7 @@ class AdminDirectoryService
         $db = \Config\Database::connect();
         $builder = $db->table('sale_event se')
             ->select('se.id, se.ern, se.sale_format, se.status, se.current_price, se.reserve_value, se.expected_value, se.created_at,
-                      t.id as tenant_id, t.name as tenant_name, l.category')
+                      t.id as tenant_id, t.name as tenant_name, l.category, l.id as listing_id, l.title')
             ->join('tenant t', 't.id = se.tenant_id')
             ->join('listing l', 'l.id = se.listing_id');
         if ($tenantId) $builder->where('se.tenant_id', $tenantId);
