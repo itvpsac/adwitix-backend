@@ -28,7 +28,7 @@ class Database extends Config
         'DSN'          => '',
         'hostname'     => 'localhost',
         'username'     => 'u619498811_adwitix',
-        'password'     => 'Jaipur123@*',
+        'password'     => '', // set in the server's .env (database.default.password) — never in the repository
         'database'     => 'u619498811_adwitix',
         'DBDriver'     => 'MySQLi',
         'DBPrefix'     => '',

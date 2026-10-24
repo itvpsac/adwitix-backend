@@ -58,8 +58,9 @@ class MediaService
         if (!$listing) {
             throw new \RuntimeException('Listing not found');
         }
-        if (!in_array($listing['status'], ['inventory', 'pending_approval'], true)) {
-            throw new \RuntimeException('Media can only be added while a listing is in inventory or pending_approval');
+        // on_hold (D-140): the seller is correcting the Lot after a Custodian objection.
+        if (!in_array($listing['status'], ['inventory', 'pending_approval', 'on_hold'], true)) {
+            throw new \RuntimeException('Media can only be added while a listing is in inventory or pending_approval, or on hold for a correction');
         }
 
         $validFiles = array_filter($files, fn($f) => $f->isValid() && !$f->hasMoved());
@@ -228,6 +229,37 @@ class MediaService
         $this->listingModel->setMediaCount($listingId, $newPhotoCountTotal);
 
         return $media;
+    }
+
+    // D-140: the seller removes a photo, video or document — while the Lot
+    // is not yet approved, or is on hold for a correction (e.g. a stock
+    // photo the Custodian objected to). The stored file is kept on disk as
+    // evidence; only the Lot stops showing it. If the main photo goes, the
+    // earliest remaining photo becomes the main one.
+    public function removeMedia(string $mediaId, string $listingId, string $partyId): void
+    {
+        $listing = $this->listingModel->find($listingId);
+        if (!$listing || $listing['seller_party_id'] !== $partyId) {
+            throw new \RuntimeException('Only the Lot\'s seller can remove its media.');
+        }
+        if (!in_array($listing['status'], ['inventory', 'pending_approval', 'on_hold'], true)) {
+            throw new \RuntimeException('Media can only be removed before the Lot is approved, or while it is on hold for a correction.');
+        }
+        $media = $this->mediaModel->where('id', $mediaId)->where('listing_id', $listingId)->first();
+        if (!$media) {
+            throw new \RuntimeException('Media not found on this Lot.');
+        }
+        $this->mediaModel->delete($mediaId);
+        if ($media['is_primary'] && $media['media_type'] === 'photo') {
+            $next = $this->mediaModel->where('listing_id', $listingId)->where('media_type', 'photo')->orderBy('created_at', 'ASC')->first();
+            if ($next) {
+                $this->mediaModel->setPrimary($next['id'], $listingId);
+            }
+        }
+        $this->listingModel->setMediaCount($listingId, $this->mediaModel->countForListing($listingId, 'photo'));
+        (new AuditLogService())->log('listing.media_removed', $partyId, [
+            'listingId' => $listingId, 'mediaId' => $mediaId, 'type' => $media['media_type'], 'file' => $media['file_path'], 'original' => $media['original_filename'],
+        ]);
     }
 
     public function setPrimary(string $mediaId, string $listingId): void

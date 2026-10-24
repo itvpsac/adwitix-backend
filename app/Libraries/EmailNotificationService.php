@@ -57,4 +57,21 @@ class EmailNotificationService
             return false;
         }
     }
+
+    // A plain notice (D-140: a Lot put on hold). Same fail-closed delivery
+    // as sendOtp — the in-app notice is what the person is guaranteed to see.
+    public function send(string $toEmail, string $subject, string $body): bool
+    {
+        try {
+            $email = \Config\Services::email();
+            $email->setTo($toEmail);
+            $email->setFrom(env('email.fromEmail', 'no-reply@adwitix.example'), env('email.fromName', 'AdwitiX'));
+            $email->setSubject($subject);
+            $email->setMessage($body . "\n\n— AdwitiX");
+            return (bool) $email->send();
+        } catch (\Throwable $e) {
+            log_message('warning', "EmailNotificationService: notice to {$toEmail} not sent: {$e->getMessage()}");
+            return false;
+        }
+    }
 }

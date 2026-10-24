@@ -370,6 +370,9 @@ class UserAuthApiService
             'created_at' => $party['created_at'] ?? null,
             // BR-51(d), D-137: documents they must (re-)accept before further use.
             'pendingAcceptances' => (new LegalDocumentService())->pendingAcceptances($party['id']),
+            // D-140: Lots on hold for a Custodian objection — the seller must
+            // read and acknowledge what that means.
+            'lotsOnHold' => (new ListingObjectionService())->openForSeller($party['id']),
             'roles' => $roles,
             'admin_tenants' => $adminTenants,
         ];

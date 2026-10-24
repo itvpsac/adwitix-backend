@@ -116,7 +116,7 @@ class SellerApplicationService
 
         $suspended = $db->table('listing')
             ->where('seller_party_id', $partyId)->where('tenant_id', $tenantId)
-            ->whereIn('status', ['inventory', 'pending_approval', 'upcoming', 'active'])
+            ->whereIn('status', ['inventory', 'pending_approval', 'upcoming', 'active', 'on_hold'])
             ->get()->getResultArray();
 
         foreach ($suspended as $listing) {
