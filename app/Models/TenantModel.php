@@ -23,7 +23,7 @@ class TenantModel extends Model
         'id', 'name', 'tenant_class', 'subdomain', 'custom_domain',
         'subscription_tier', 'branding_logo_url', 'branding_primary_color',
         'terms_url', 'suspended_at', 'updated_at', 'low_bracket_max', 'medium_bracket_max',
-        'webhook_url', 'webhook_signing_secret',
+        'webhook_url', 'webhook_signing_secret', 'extra_storage_gb',
     ];
 
     public function createTenant(array $data): array
@@ -99,21 +99,21 @@ class TenantModel extends Model
         return $counts;
     }
 
-    // BR-66: API availability is a package feature that varies by tier —
-    // CoCo Starter has none, TSX Launch is read-only, TSX Growth adds
-    // listing push, TSX Enterprise adds Sale System push too.
+    // BR-66: API availability is a package feature that varies by plan.
+    // D-138: read from the plan's api_access (subscription_plan), so the
+    // Custodian's Plans page decides it — none, read, read + push Lots, full.
     public static function hasApiAccess(string $subscriptionTier): bool
     {
-        return $subscriptionTier !== 'coco_starter';
+        return \App\Libraries\PlanService::hasApiAccess($subscriptionTier);
     }
 
     public static function canPushListings(string $subscriptionTier): bool
     {
-        return in_array($subscriptionTier, ['tsx_growth', 'tsx_enterprise'], true);
+        return \App\Libraries\PlanService::canPushListings($subscriptionTier);
     }
 
     public static function canPushSaleEvents(string $subscriptionTier): bool
     {
-        return $subscriptionTier === 'tsx_enterprise';
+        return \App\Libraries\PlanService::canPushSaleEvents($subscriptionTier);
     }
 }

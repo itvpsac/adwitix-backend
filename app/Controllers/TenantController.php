@@ -132,7 +132,8 @@ class TenantController extends BaseController
             ->where('r.tenant_id', $tenantId)->where('r.role', 'tenant_admin')->where('r.revoked_at', null)
             ->orderBy('r.granted_at', 'ASC')->get()->getResultArray();
 
-        return $this->apiResponse(['tenant' => $tenant, 'stats' => $stats, 'admins' => $admins]);
+        return $this->apiResponse(['tenant' => $tenant, 'stats' => $stats, 'admins' => $admins,
+            'planUsage' => \App\Libraries\PlanService::usage($tenant)]);
     }
 
     // BR-06: tenant branding (logo + primary color). jwtSuperAdmin-gated.
@@ -165,6 +166,14 @@ class TenantController extends BaseController
             'branding_primary_color' => $postedColor ?: $tenant['branding_primary_color'],
             'terms_url' => $this->request->getPost('terms_url') ?: $tenant['terms_url'],
         ];
+        // D-138: storage bought on top of the plan's own allowance.
+        $extra = $this->request->getPost('extra_storage_gb');
+        if ($extra !== null && $extra !== '') {
+            if (!ctype_digit((string) $extra) || (int) $extra > 100000) {
+                return $this->jsonError(422, 'invalid_extra_storage', 'Extra storage must be a whole number of GB.');
+            }
+            $update['extra_storage_gb'] = (int) $extra;
+        }
 
         $logo = $this->request->getFile('branding_logo');
         if ($logo && $logo->isValid() && !$logo->hasMoved()) {

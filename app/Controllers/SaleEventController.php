@@ -174,15 +174,15 @@ class SaleEventController extends BaseController
         }
 
         // BR-31/32 (D-87/D-88): Fee Payer Election -- Buyer-Pays (default)
-        // or Seller-Pays. Not offered on Tender. Seller-Pays is
-        // restricted to non-CoCo-Starter tenants.
+        // or Seller-Pays. Not offered on Tender. Seller-Pays is a plan
+        // feature (D-138: subscription_plan.seller_pays_allowed).
         if ($format !== 'tender') {
             $feePayer = $this->input('fee_payer') === 'seller_pays' ? 'seller_pays' : 'buyer_pays';
             if ($feePayer === 'seller_pays') {
                 $tenant = (new \App\Models\TenantModel())->find($listing['tenant_id']);
-                if ($tenant['subscription_tier'] === 'coco_starter') {
+                if (!\App\Libraries\PlanService::sellerPaysAllowed($tenant['subscription_tier'])) {
                     return $this->jsonError(403, 'br32_seller_pays_unavailable',
-                        'BR-32: Seller-Pays is not available on a CoCo Starter TSX -- upgrade to a paid TSX tier to offer Seller-Pays on this Trading Session.'
+                        'BR-32: Seller-Pays is not included in this TSX\'s plan -- move to a plan that includes it to offer Seller-Pays on this Trading Session.'
                     );
                 }
             }

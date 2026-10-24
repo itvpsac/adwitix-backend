@@ -9004,3 +9004,38 @@ Discussed against the rules first, then confirmed:
 **Found on the live content by the first run of the checks** (left for the project owner to fix through the page):
 - The Terms of Usage §8 says disputes go to "the courts at [city — TODO]".
 - Terminology still says "SaaS Admin" in two places.
+
+### D-138: TSX plan limits as data, enforced; Custodian Plans sheet
+
+**Decision (project owner):** "start enforcing the storage and photo limits per plan and other dynamic factors per each TSX type subscriptions. make a helper page also - comparison sheet". Every plan-dependent rule now reads one table, `subscription_plan`, so the Custodian can change a plan on a page and the platform behaves differently at once, with no code change.
+
+- **The table:** migration 077. It has one row per plan: Salvage Managers (`coco_starter`), TSX Launch, TSX Growth and TSX Enterprise.
+  - Each row holds price, API access, Seller-Pays, TSX Masters, staff roles and SSO.
+  - It holds the media and storage limits.
+  - It holds retention, purge, backup and restore.
+  - A NULL limit means unlimited.
+  - The seed values are the ones the Pricing page already published (§6.5).
+- **`tenant.extra_storage_gb`:** records storage a TSX has bought on top of its plan. The rate is ₹2,000 per 100 GB a year.
+- **Enforced** (`PlanService`):
+  - **On upload** (`MediaService::enqueueUploads`), each file is checked before anything is staged:
+    - photos, videos and documents per Lot, counting existing and still-queued media;
+    - the plan's largest-file limit, which never exceeds the platform caps of 8 MB a photo, 20 MB a PDF and 500 MB a video;
+    - the TSX's total storage, measured as the sum of its Lots' stored media against the plan allowance plus extra storage.
+    - A refusal names the limit it hit.
+  - **API access (BR-66):** `TenantModel::hasApiAccess`, `canPushListings` and `canPushSaleEvents` read `api_access` (none, read, read + push Lots, or full).
+  - **Seller-Pays (BR-32):** read from `seller_pays_allowed`, in both the portal and the TSX API.
+- **Policy, not yet automated:** retention, purge, backups, restore, staff roles and SSO. The sheet labels these rows "Policy".
+- **BR-11:** the fixed 50-photo maximum is replaced by the plan limit (TSX Launch 100, TSX Growth 300, the others unlimited). The 5-photo minimum is unchanged.
+  - BR-11's text in the master document still says 5–50 and should be updated to "at least 5, up to the plan's limit".
+- **Lowering a limit** never removes media already uploaded. It only blocks new uploads above the limit.
+- **Endpoints:**
+  - `GET /plans` is public and cached for 300 s.
+  - `GET /admin/plans` returns the plans, the enforced fields and the number of TSXs on each plan.
+  - `POST /admin/plans/:key` validates each field and writes a `subscription_plan.updated` audit entry with the from/to of every changed field.
+  - `GET /admin/tenants/:id` now includes `planUsage`.
+  - Tenant edit accepts `extra_storage_gb`.
+- **Frontend:**
+  - **Custodian → Governance → Plans** is a comparison sheet. It shows the plans side by side, grouped rows with Enforced/Policy badges, TSX counts per plan, the date each plan was last changed, a print layout, and an edit mode. Saving confirms how many TSXs the change affects.
+  - **TradeSphereX page:** a storage meter, the largest Lot against each per-Lot limit, and an "Extra storage bought (GB)" field.
+  - **Pricing page:** the storage and retention table is built from `GET /plans`. If the request fails, it falls back to the built-in values.
+  - **Create Lot:** shows the chosen TSX's photo, video and file limits.

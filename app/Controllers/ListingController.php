@@ -339,6 +339,7 @@ class ListingController extends BaseController
             'canFlagCbsViolation' => $isTenantAdminForListing,
             'isTenantAdminForListing' => $isTenantAdminForListing,
             'minPhotos' => \App\Libraries\MediaService::minPhotos(),
+            'mediaLimits' => \App\Libraries\PlanService::lotLimits($tenant),
             'rejectionReasons' => \App\Libraries\ListingLifecycleService::REJECTION_REASONS,
             'settlementRecord' => $settlementRecord,
             'relatedListings' => $relatedListings,
