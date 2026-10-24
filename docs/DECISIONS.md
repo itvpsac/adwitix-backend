@@ -9110,3 +9110,26 @@ Discussed against the rules first, then confirmed:
 - **Terminology:** "Custodian (SaaS Admin)" is now "Custodian", published as version 2 through the Documents service (migration 079), and in the page's built-in fallback text.
 - **Not done:** the Terms §8 city is still waiting for the project owner's choice.
 - **Privacy draft:** a new section 5.6A covers Lot holds.
+
+### D-141: Reactivating a suspended Lot
+
+**Decision (project owner):** "Yes build the reactivate button".
+
+**Rules applied:**
+- **Custodian Stop Lot (D-132):** a Lot suspended this way can be reactivated.
+- **Seller suspended by the TSX Master (BR-09):** the Lot can be reactivated only after that TSX Master approves the seller again.
+- **Seller delisted for confirmed fraud (BR-38):** the Lot can never be reactivated.
+
+**Where the Lot goes:**
+- It never goes straight back to sale, because its sessions were cancelled and its bids refunded.
+- It returns to `pending_approval` for the TSX Master (BR-13); the seller then opens a new Trading Session.
+- If it had never been approved, it returns to the seller's inventory.
+- If a Custodian objection on it is still open (D-140), it returns to `on_hold`.
+
+**Built:**
+- `POST /admin/listings/:id/reactivate {reason}`, Custodian only. A reason is required, and it is audited as `listing.reactivated_by_custodian` with the earlier suspension text.
+- The Lot dossier now carries `reactivation` (allowed, where it returns to, and why).
+- In the Lot file:
+  - A green **Reactivate Lot** button whose confirmation says where the Lot will go.
+  - When reactivation isn't allowed, a banner says why.
+  - The "Last rejection" banner reads "Suspended" for suspended Lots.

@@ -138,6 +138,7 @@ $routes->get('/api/v1/app/admin/decision-queue', 'AdminController::decisionQueue
 $routes->get('/api/v1/app/admin/system-health', 'AdminController::systemHealth', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/listings/(:segment)/dossier', 'AdminController::lotDossier/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/listings/(:segment)/stop', 'AdminController::stopListing/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/listings/(:segment)/reactivate', 'AdminController::reactivateListing/$1', ['filter' => 'jwtSuperAdmin']);
 // D-140: Custodian objections to a Lot, and the seller's side of them.
 $routes->post('/api/v1/app/admin/listings/(:segment)/objections', 'ListingObjectionController::raise/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/objections/(:segment)/review', 'ListingObjectionController::review/$1', ['filter' => 'jwtSuperAdmin']);

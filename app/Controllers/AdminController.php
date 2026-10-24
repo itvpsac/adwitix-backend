@@ -243,6 +243,61 @@ class AdminController extends BaseController
             'message' => 'Lot stopped' . ($stopped ? ' and its live Trading Session cancelled.' : '.')]);
     }
 
+    // D-141: can a suspended Lot be reactivated, and to what? A Lot stopped
+    // by the Custodian can; one suspended with its seller (BR-09) can once
+    // the TSX Master has approved the seller there again; one whose seller
+    // was delisted for confirmed fraud (BR-38) never can. It never goes
+    // straight back to sale: its sessions and bids are gone, so it returns
+    // for the TSX Master's approval (BR-13) — or to the seller's inventory
+    // if it had never been approved. An open Custodian objection sends it back
+    // on hold instead, since that objection still needs putting right.
+    private function reactivation(array $listing): array
+    {
+        if ($listing['status'] !== 'suspended' || !empty($listing['archived_at'])) {
+            return ['allowed' => false, 'why' => 'Only a suspended Lot can be reactivated.'];
+        }
+        $seller = (new \App\Models\PartyModel())->find($listing['seller_party_id']);
+        if (!empty($seller['seller_delisted_at'])) {
+            return ['allowed' => false, 'why' => 'The seller was delisted for confirmed fraud (BR-38). That is permanent, so their Lots cannot be reactivated.'];
+        }
+        if (!(new \App\Libraries\SellerApplicationService())->isApprovedSeller($listing['seller_party_id'], $listing['tenant_id'])) {
+            return ['allowed' => false, 'why' => 'The seller is not an approved seller on this TradeSphereX any more — its TSX Master suspended them (BR-09). The TSX Master must approve them as a seller again first.'];
+        }
+        $db = \Config\Database::connect();
+        if ((new \App\Libraries\ListingObjectionService())->openFor($listing['id'])) {
+            return ['allowed' => true, 'returnsTo' => 'on_hold', 'why' => 'It returns on hold: the Custodian\'s objection to it is still open.'];
+        }
+        $everApproved = $db->table('sale_event')->where('listing_id', $listing['id'])->countAllResults() > 0
+            || $db->table('audit_log')->where('event_type', 'listing.approved')->like('payload', $listing['id'])->countAllResults() > 0;
+        return $everApproved
+            ? ['allowed' => true, 'returnsTo' => 'pending_approval', 'why' => 'It returns for its TSX Master\'s approval; the seller then opens a new Trading Session.']
+            : ['allowed' => true, 'returnsTo' => 'inventory', 'why' => 'It returns to the seller\'s inventory, since it had not been approved before; the seller submits it for approval again.'];
+    }
+
+    // POST /admin/listings/:id/reactivate {reason}
+    public function reactivateListing(string $listingId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for reactivating this Lot.');
+        }
+        $listingModel = new \App\Models\ListingModel();
+        $listing = $listingModel->find($listingId);
+        if (!$listing) {
+            return $this->jsonError(404, 'not_found', 'Lot not found.');
+        }
+        $r = $this->reactivation($listing);
+        if (!$r['allowed']) {
+            return $this->jsonError(409, 'cannot_reactivate', $r['why']);
+        }
+        $listingModel->update($listingId, ['status' => $r['returnsTo'], 'rejection_reason' => null, 'updated_at' => date('Y-m-d H:i:s')]);
+        (new \App\Libraries\AuditLogService())->log('listing.reactivated_by_custodian', UserAuthContext::partyId(), [
+            'listingId' => $listingId, 'reason' => $reason, 'returnsTo' => $r['returnsTo'], 'previousSuspension' => $listing['rejection_reason'],
+        ]);
+        $where = ['pending_approval' => 'waiting for its TSX Master\'s approval', 'inventory' => 'back in the seller\'s inventory', 'on_hold' => 'back on hold for the open objection'][$r['returnsTo']];
+        return $this->apiResponse(['listing' => $listingModel->find($listingId), 'message' => "Lot reactivated — it is {$where}."]);
+    }
+
     // GET /admin/listings/:id/dossier (D-133): everything about one Lot for
     // the Custodian — nothing withheld. The Lot (archived or not) and the
     // versions it superseded or was superseded by, its seller, TradeSphereX
@@ -359,6 +414,7 @@ class AdminController extends BaseController
             'media' => $db->table('listing_media')->where('listing_id', $listingId)->get()->getResultArray(),
             'versions' => $versions, 'sessions' => $sessions,
             'objections' => (new \App\Libraries\ListingObjectionService())->forListing($listingId),
+            'reactivation' => $listing['status'] === 'suspended' ? $this->reactivation($listing) : null,
             'objectionReasons' => array_map(fn($r) => $r[0], \App\Libraries\ListingObjectionService::REASONS),
             'engagement' => [
                 'views' => $db->table('listing_view')->where('listing_id', $listingId)->countAllResults(),
