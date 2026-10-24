@@ -134,6 +134,8 @@ jobs:
           done
           cnf=$(mktemp); trap 'rm -f "$cnf"' EXIT
           db=$("$PHP" "$DEPLOY_PATH/spark" backup:mysql-config "$cnf" | tail -1)
+          echo "== Server location (public IP lookup)"; curl -s --max-time 10 https://ipinfo.io/json | grep -E '"(city|region|country|org|timezone)"' || echo "lookup unavailable"
+          echo "== Round trip from the server to an Indian host"; curl -s --max-time 10 -o /dev/null -w 'www.iitb.ac.in: %{time_connect}s connect\n' https://www.iitb.ac.in/ || true
           echo "== Deploy processes still running"; ps -u "$(id -un)" -o pid,etime,args 2>/dev/null | grep -E "spark|composer|mysqldump|backup.sh|tar " | grep -v grep || echo "none"
           echo "== Latest releases"; ls -1t "$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-releases" | head -3; echo "live -> $(readlink "$DEPLOY_PATH")"
           echo "== Latest backups"; ls -lt "$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-backups" 2>/dev/null | head -4

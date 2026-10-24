@@ -9145,3 +9145,27 @@ Discussed against the rules first, then confirmed:
   - The migration does nothing if a draft is in progress or the placeholder is already gone.
 - **Fallback text:** the page's built-in fallback text (`TermsOfUsage.jsx`) is updated to match.
 - **For the legal adviser:** the clause is upheld only if New Delhi courts otherwise have jurisdiction, for example because the registered office or the business is there. Consumers keep their statutory right to approach a Consumer Commission where they live.
+
+### D-143: Database password changed and removed from the code; sample tenants deleted; BR-45 photo maximum
+
+**Decisions (project owner):** "yes, rotate the database password"; Punjab India Bank and XYZ Company are not real tenants; BR-45's "maximum 50 photos" becomes the plan limit ("Agree").
+
+- **Database password:**
+  - The live password was committed in `app/Config/Database.php`, and `itvpsac/adwitix-backend` is a **public** repository.
+  - It was changed on 24 Oct 2026 by `diagnose.yml` with `rotate_db_password = rotate`, dispatched from the working branch:
+    1. The new password is generated on the server and set on the app's database user.
+    2. It is written only to `adwitix-shared/.env` and never printed.
+    3. The run checks that the app resolves the new password, that it connects with it, that the old password no longer works, and that the live site still queries the database.
+    4. On any failure everything is restored.
+  - The script was rehearsed locally on both the success path and the rollback path, with no secret appearing in the output.
+  - The production run succeeded, and a tenant census straight afterwards read the database normally.
+  - `Database.php` now has an empty password, and production reads it from the server's `.env`.
+  - The old password remains in Git history, but no longer works.
+- **Still for the owner:**
+  - Replace the SSH deploy key, which was exposed in chat (hPanel → SSH Access, then the GitHub secret `DEPLOY_SSH_KEY`).
+  - Optionally make both repositories private.
+- **Sample tenants (migration 081):** Punjab India Bank and XYZ Company are each matched by id and name.
+  - Their roles are removed; Punjab India Bank's TSX Master keeps their user account.
+  - Each tenant is deleted only if nothing else refers to it, and the deletion is audited as `tenant.deleted` with reason "Sample tenant — not real". Salvage Managers is then the only TradeSphereX.
+- **BR-45 (master document v4, in both repos):** "a minimum of 5 seller-uploaded photographs, and no more than the per-Lot photo limit of its TradeSphereX's subscription plan (Section 6.5)". The fixed 50 is gone, matching what D-138 enforces.
+- **Diagnose workflow:** now also reports the server's location (public IP lookup) and a round-trip time to an Indian host, to inform the hosting-location decision.
