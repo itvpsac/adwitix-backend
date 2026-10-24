@@ -27,6 +27,10 @@ class SaleEventController extends BaseController
     // Easy Auction (reserve_value) or Buy-Now (expected_value).
     public function createSubmit(string $listingId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $sellerId = UserAuthContext::partyId();
 
         // BR-15: "structurally barred from... attaching Sale Events...

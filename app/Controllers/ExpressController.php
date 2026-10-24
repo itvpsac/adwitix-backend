@@ -24,6 +24,10 @@ class ExpressController extends BaseController
     // bidding), which is NOT a stand-in — that part is real.
     public function pledge(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $buyerId = UserAuthContext::partyId();
 
         if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($buyerId)) {
@@ -41,6 +45,10 @@ class ExpressController extends BaseController
 
     public function placeBid(string $saleEventId)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $bidderId = UserAuthContext::partyId();
 
         if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($bidderId)) {

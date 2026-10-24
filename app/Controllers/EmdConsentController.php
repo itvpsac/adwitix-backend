@@ -39,6 +39,10 @@ class EmdConsentController extends BaseController
 
     public function confirm(string $saleEventId, string $action)
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $partyId = UserAuthContext::partyId();
 
         // BR-15: structurally barred from pledging under any

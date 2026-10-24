@@ -20,22 +20,30 @@ class ConsentService
             'I accept the Terms of Usage and Privacy Policy.', $ipAddress);
     }
 
-    private function record(string $partyId, string $consentType, ?string $relatedReferenceId, string $consentText, ?string $ipAddress): array
+    // BR-51(a)/(d), D-137: acceptance of one version of a published document
+    // (Terms of Usage, Privacy Policy). terms_version is "<slug>@v<n>".
+    public function recordDocumentAcceptance(string $partyId, string $slug, int $version, string $consentText, ?string $ipAddress = null): array
     {
+        return $this->record($partyId, 'document_acceptance', $slug, $consentText, $ipAddress, "{$slug}@v{$version}");
+    }
+
+    private function record(string $partyId, string $consentType, ?string $relatedReferenceId, string $consentText, ?string $ipAddress, ?string $termsVersion = null): array
+    {
+        $termsVersion ??= self::TERMS_VERSION;
         $db = \Config\Database::connect();
         $id = Uuid::v4();
         $db->table('consent_event')->insert([
             'id' => $id,
             'party_id' => $partyId,
             'consent_type' => $consentType,
-            'terms_version' => self::TERMS_VERSION,
+            'terms_version' => $termsVersion,
             'related_reference_id' => $relatedReferenceId,
             'consent_text_shown' => $consentText,
             'ip_address' => $ipAddress,
         ]);
 
         (new AuditLogService())->log('consent.recorded', $partyId, [
-            'consentType' => $consentType, 'termsVersion' => self::TERMS_VERSION, 'relatedReferenceId' => $relatedReferenceId,
+            'consentType' => $consentType, 'termsVersion' => $termsVersion, 'relatedReferenceId' => $relatedReferenceId,
         ]);
 
         return $db->table('consent_event')->where('id', $id)->get()->getRowArray();

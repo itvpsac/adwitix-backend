@@ -20,9 +20,12 @@ class TenantController extends BaseController
         $name = $this->input('name');
         $tenantClass = $this->input('tenant_class') ?: 'general';
         $subdomain = $this->input('subdomain');
-        $subscriptionTier = $this->input('subscription_tier') ?: 'coco_starter';
+        $subscriptionTier = $this->input('subscription_tier') ?: ($tenantClass === 'company_shop' ? TenantModel::SALVAGE_MANAGERS_TIER : 'tsx_launch');
         if (!in_array($subscriptionTier, TenantModel::SUBSCRIPTION_TIERS, true)) {
             return $this->jsonError(422, 'invalid_tier', 'Invalid subscription tier.');
+        }
+        if ($subscriptionTier === TenantModel::SALVAGE_MANAGERS_TIER && ($existing = $this->tenantModel->salvageManagers())) {
+            return $this->jsonError(409, 'salvage_managers_exists', "There is only one Salvage Managers — it is already \"{$existing['name']}\".");
         }
         // BR-06: "a dedicated subdomain ... or custom domain" — optional,
         // set once at whitelisting time like subdomain itself.
@@ -44,11 +47,55 @@ class TenantController extends BaseController
         return $this->apiResponse(['tenant' => $tenant, 'message' => "Tenant \"{$tenant['name']}\" whitelisted successfully."], null, 201);
     }
 
+    // POST /admin/tenants/:id/delete (jwtSuperAdmin). Only a TSX with
+    // nothing on it — no Lots, sessions, roles, applications, invoices… —
+    // and never Salvage Managers. Logged in the audit chain.
+    public function delete(string $tenantId)
+    {
+        $tenant = $this->tenantModel->find($tenantId);
+        if (!$tenant) {
+            return $this->jsonError(404, 'not_found', 'Tenant not found.');
+        }
+        if (TenantModel::isSalvageManagers($tenant)) {
+            return $this->jsonError(409, 'salvage_managers', 'Salvage Managers is the platform\'s own TradeSphereX and cannot be deleted.');
+        }
+        $refs = $this->tenantModel->referenceCounts($tenantId);
+        if ($refs) {
+            $what = implode(', ', array_map(fn($t, $n) => str_replace('_', ' ', $t) . " ({$n})", array_keys($refs), $refs));
+            return $this->jsonError(409, 'tenant_in_use', "\"{$tenant['name']}\" still has records ({$what}), so it can't be deleted.");
+        }
+        $this->tenantModel->delete($tenantId);
+        (new \App\Libraries\AuditLogService())->log('tenant.deleted', \App\Libraries\UserAuthContext::partyId(), [
+            'tenantId' => $tenantId, 'name' => $tenant['name'], 'subdomain' => $tenant['subdomain'],
+        ]);
+        return $this->apiResponse(['message' => "\"{$tenant['name']}\" deleted."]);
+    }
+
+    // GET /my-seller-tenants (jwtAuth): the TradeSphereX the caller may list
+    // on — Salvage Managers (open to all, D-131) first, then every TSX they
+    // are an approved seller on (BR-09).
+    public function mySellerTenants()
+    {
+        $partyId = \App\Libraries\UserAuthContext::partyId();
+        $ids = array_column((new \App\Models\PartyRoleModel())
+            ->select('tenant_id')->where('party_id', $partyId)->where('role', 'seller')
+            ->where('revoked_at', null)->where('tenant_id IS NOT NULL', null, false)->findAll(), 'tenant_id');
+        $cols = 'id, name, subdomain, subscription_tier';
+        $sm = $this->tenantModel->select($cols)->where('subscription_tier', TenantModel::SALVAGE_MANAGERS_TIER)->first();
+        // Selling on Salvage Managers needs no approval (D-131), unless the
+        // seller has been suspended there.
+        if ($sm && (new \App\Libraries\SellerApplicationService())->isApprovedSeller($partyId, $sm['id'])) {
+            $ids[] = $sm['id'];
+        }
+        $tenants = $ids ? $this->tenantModel->select($cols)->whereIn('id', array_unique($ids))->where('suspended_at', null)->salvageManagersFirst()->findAll() : [];
+        return $this->apiResponse(['tenants' => $tenants, 'salvageManagers' => $sm]);
+    }
+
     // jwtSuperAdmin-gated.
     public function list()
     {
         $q = trim((string) $this->request->getGet('q'));
-        $builder = $this->tenantModel->orderBy('name', 'ASC');
+        $builder = $this->tenantModel->salvageManagersFirst();
         if ($q !== '') {
             $builder = $builder->groupStart()->like('name', $q)->orLike('subdomain', $q)->groupEnd();
         }
@@ -107,10 +154,14 @@ class TenantController extends BaseController
         if (!in_array($subscriptionTier, TenantModel::SUBSCRIPTION_TIERS, true)) {
             return $this->jsonError(422, 'invalid_tier', 'Invalid subscription tier.');
         }
+        if ($subscriptionTier === TenantModel::SALVAGE_MANAGERS_TIER && ($existing = (new TenantModel())->salvageManagers($tenantId))) {
+            return $this->jsonError(409, 'salvage_managers_exists', "There is only one Salvage Managers — it is already \"{$existing['name']}\".");
+        }
 
         $update = [
             'name' => $this->request->getPost('name') ?: $tenant['name'],
             'subscription_tier' => $subscriptionTier,
+            'tenant_class' => TenantModel::classForTier($subscriptionTier, $tenant['tenant_class']),
             'branding_primary_color' => $postedColor ?: $tenant['branding_primary_color'],
             'terms_url' => $this->request->getPost('terms_url') ?: $tenant['terms_url'],
         ];
@@ -140,7 +191,7 @@ class TenantController extends BaseController
         $tenants = $this->tenantModel
             ->select('id, name, tenant_class, subdomain, custom_domain, subscription_tier, branding_primary_color')
             ->where('suspended_at', null)
-            ->orderBy('name', 'ASC')->findAll();
+            ->salvageManagersFirst()->findAll();
         return $this->apiResponse(['tenants' => $tenants]);
     }
 }

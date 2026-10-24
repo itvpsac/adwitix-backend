@@ -68,6 +68,10 @@ class ListingController extends BaseController
 
     public function createSubmit()
     {
+        if ($frozen = $this->refuseIfFrozen()) {
+            return $frozen;
+        }
+
         $sellerId = UserAuthContext::partyId();
 
         // BR-15: "structurally barred from listing assets... under any
@@ -97,6 +101,9 @@ class ListingController extends BaseController
         // Seller on THIS specific tenant may list here.
         $sellerApp = new \App\Libraries\SellerApplicationService();
         if (!$sellerApp->isApprovedSeller($sellerId, $tenantId)) {
+            if (\App\Libraries\SellerApplicationService::isOpenSelling((string) $tenantId)) {
+                return $this->jsonError(403, 'seller_suspended', 'Your selling on Salvage Managers has been suspended by its TSX Master.');
+            }
             return $this->jsonError(403, 'br09_not_approved_seller', 'BR-09: you must be an approved Seller on this specific tenant before listing here.');
         }
 

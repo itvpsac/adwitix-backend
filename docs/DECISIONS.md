@@ -8754,3 +8754,253 @@ against, not just an empty state. The complete 39-suite `test:*`
 regression was re-run from a **separate, freshly-migrated database**
 (not the seeded one) immediately afterward and passed clean, 39/39 —
 confirming this new command has no effect on the existing test suite.
+
+### D-130: Salvage Managers is the one CoCo TradeSphereX
+
+**Decision (project owner):** "There will only be one COCO tenant and
+that is Salvage Managers." BR-12 already names Salvage Managers as the
+Company Shop, the only TSX allowed to run Tender Auctions. The code,
+though, marked it in two unrelated places:
+- Tender access checked `tenant_class = company_shop`.
+- CoCo checked `subscription_tier = coco_starter`.
+
+`subscription_tier` also defaulted to `coco_starter`, so every TSX
+created without a plan became CoCo. That is how production ended up with
+two: "General Marketplace" and "Salvage Managers".
+
+**Built:**
+- **Single source of truth:** `TenantModel::isSalvageManagers()` and `classForTier()`.
+  - The CoCo plan always carries the Company Shop class, and any other plan drops it.
+  - This holds on create (`createTenant`) and on edit (`TenantController::editSubmit`).
+- **Tender gate:** `TenderService::validateCompanyShopOnly` now checks `isSalvageManagers()`.
+- **One holder only:** a second CoCo TSX is refused with a 409, on create and on edit.
+- **Ordering:** every tenant list sorts Salvage Managers first (`salvageManagersFirst()`).
+- **Defaults:** new tenants default to `tsx_launch`, in the API and in the column (migration 000074).
+- **Data fix (migration 000074):** if a TSX named "Salvage Managers" holds CoCo, every other CoCo TSX moves to `tsx_launch`. Class then follows plan.
+- **Pricing pages** (React `Pricing.jsx` and `public/pricing.html`) now show "Salvage Managers" in place of "CoCo Starter", with the proposed allowances.
+
+**Rule text:** drafted in `docs/drafts/D-130_Salvage_Managers_rule_change.md`
+for the project owner's approval before `ADWITIX_Master.docx` is amended.
+- Section 6.5 gives Salvage Managers Enterprise-level storage and retention.
+- Buyer-Pays only is unchanged.
+
+**Verified:**
+- The migration ran against a production-like duplicate (two CoCo tenants).
+- `test:tenderfoundation` (14), `test:tenderreview` (21), `test:tenderbidding` (14), `test:tenantapi` (25) and `test:successfee` (25) all pass on a clean schema copy.
+
+**D-130 addendum: General Marketplace is not a tenant.** The project owner:
+"General market place is the place where lots from every TSX are
+shown … It is not a tsx." A read-only census of production (new
+`diagnose.yml` step) found a "General Marketplace" tenant row holding
+all 7 Lots and 1 role. Create Lot had a hard-coded tenant id that
+pointed at it. Salvage Managers had nothing, at subdomain
+`pune-business`, and 8 other tenants had no records.
+
+Approved and built:
+- **Migration 000074 (rewritten, not yet deployed):**
+  - Moves every row that references the General Marketplace tenant to Salvage Managers. This covers every table with a `tenant_id` foreign key: Lots, sessions, roles, applications, ledgers and invoices.
+  - Logs `tenant.merged_into_salvage_managers` in the audit chain with the per-table counts, then deletes the empty row.
+  - Gives Salvage Managers the subdomain `salvage-managers`, the CoCo plan and the Company Shop class.
+  - Takes CoCo and Company Shop off every other TSX.
+- **`POST /admin/tenants/:id/delete`** (Custodian):
+  - Refused for Salvage Managers.
+  - Refused for any TSX that still has rows in a table pointing at it; the refusal says which tables.
+  - Logged as `tenant.deleted`.
+  - Shown as a Delete button on the TradeSphereX page, so the 8 sample tenants can be removed.
+- **`GET /my-seller-tenants`:** returns the TSXs the caller is an approved seller on, Salvage Managers first. Create Lot now offers only those, defaulting to Salvage Managers. A seller approved on none is sent to Apply to Sell on Salvage Managers. The hard-coded tenant id is gone.
+- **`ADWITIX_Master.docx` is now v3** with the approved text. The glossary now says the General Marketplace is the combined view of every TSX, not a Tenant.
+
+### D-131: Open selling on Salvage Managers
+
+**Decision (project owner):** "At salvage managers the sellers do not need
+approval to allow them to sell, yet the lot is approved like any other
+tsx. At other tsx to become a seller tsx master has to accord approval to
+the seller."
+
+**Built:**
+- **Who may list (`SellerApplicationService::isApprovedSeller()`):**
+  - On Salvage Managers, any caller may list unless its TSX Master has suspended them there.
+  - Every other TSX still needs an active seller role (BR-09).
+  - The KYC (BR-55) and delisting (BR-38) checks in `ListingController::createSubmit` still apply everywhere.
+  - Lot approval (BR-13) is unchanged.
+- **Applications:** `apply()` refuses an application to Salvage Managers, because none is needed.
+- **Suspension on Salvage Managers:** with no application to revoke, `suspendSeller()` records a revoked seller role. `isApprovedSeller()` reads that as suspended, and the BR-09 listing-suspension cascade runs as before.
+- **`GET /my-seller-tenants`:** always includes Salvage Managers unless the caller is suspended there.
+- **`GET /tenants/:id/apply-to-sell`:** returns `openSelling` and `canSell`.
+- **Frontend:**
+  - Apply to Sell shows "No approval needed — List a Lot" for Salvage Managers.
+  - The TradeSphereX Directory card for Salvage Managers says "List a Lot Here" instead of "Apply".
+  - Create Lot offers Salvage Managers to every seller.
+- **`ADWITIX_Master.docx`, BR-09:** adds the Salvage Managers exception.
+
+### D-132: The Custodian watches and can stop; the TSX Master approves
+
+**Decision (project owner):** "The lots shown on custodian panel just for
+status and checking what is being sold, if required should be able to
+stop any lot or event. Basic approval for lot and event is given by tsx
+master themselves."
+
+**Already true:** approving a Lot or Trading Session goes through
+`jwtTenantAdmin`, which the Super Admin does not pass (verified: 403). The
+Decision Queue lists pending Lots only as "Waiting on the TSX Master".
+
+**Built:**
+- **`POST /admin/sale-events/:id/stop {reason}`** (jwtSuperAdmin):
+  - Runs the BR-14 emergency stop (`ListingLifecycleService::emergencyStop`): cancels the session, withdraws bids and releases every EMD hold.
+  - Works only while the session is pending approval, in grace period or active.
+- **`POST /admin/listings/:id/stop {reason}`** (jwtSuperAdmin):
+  - Emergency-stops every live session on the Lot.
+  - Sets the Lot to `suspended`, with "Stopped by the Custodian: …" shown to the seller.
+  - Logs `listing.stopped_by_custodian`.
+  - A sold, ended or already-suspended Lot is refused (409).
+- **Reason:** both endpoints require one, and it goes into the audit chain.
+- **Frontend:** a Stop button on the Lot Directory and Trading Session Directory for live rows (`components/custodian/StopAction.jsx`). It opens a confirmation dialog with a required reason.
+
+**Hardening found while testing:** the temporary `admin.authBypass`
+switch makes every caller the Super Admin. It is now ignored whenever
+`CI_ENVIRONMENT` is production, in both `JwtSuperAdminFilter` and
+`devBypassLogin`. `diagnose.yml` now checks it. On 22 Oct 2026 production
+answered 401 to an anonymous admin call, so the switch was off there.
+
+### D-133: Nothing about a Lot is hidden from the Custodian
+
+**Decision (project owner):** "custodian needs to see everything about
+every lot and event - dont hide anything from custodian". Prompted by Lot
+Detail showing the Custodian "Identity not disclosed" for the seller.
+
+**Built:**
+- **`GET /admin/listings/:id/dossier`** (jwtSuperAdmin) returns everything about one Lot:
+  - every column of the Lot, archived or not, plus its other versions;
+  - the TradeSphereX and its TSX Masters;
+  - full party rows for the seller and everyone else the file mentions (bidders, buyers, depositors, dispute parties, the inspector);
+  - all media;
+  - every Trading Session (all columns, reserve value included), each with its bids, offers, EMD holds, Tender interest, settlement, disputes and chronicle references;
+  - engagement: views, unique viewers, favourites and seller messages;
+  - every audit-chain entry whose payload names the Lot or any of its sessions.
+- **Credentials:** `ApiResponse` still strips credential columns (mpin_hash, totp_secret and the like). Verified that none appear.
+- **Lot file page (`/custodian/lot?id=`):**
+  - Lists every stored field generically, so a new column appears without a code change. Empty fields sit behind "Show N empty fields".
+  - Has Stop Lot and Stop session buttons (D-132).
+- **Links into the Lot file:**
+  - The Lot Directory row title and the Trading Session Directory ERN open it, at that session.
+  - For the Custodian only, Lot Detail now names the seller and links to the file. Buyers still see "Identity not disclosed" (verified).
+
+### D-134: Traders are the Custodian's to monitor and control (User file, Freeze)
+
+**Decision (project owner):** buyers/traders "are being monitored and
+controlled by custodian", who should "see everything about traders and
+their trading activities", their selling and TSX Master activity once they
+have those roles, and the "complete log and movement of star rating".
+Discussed against the rules first, then confirmed:
+1. **BR-16 stays (option A).** The Custodian is blind to bidder identity while a session is live. Names unlock at close.
+2. **Freeze account: yes.** Editing star ratings directly: no (BR-36).
+3. **Browsing stays private:** search history, saved searches, preferences, favourites and lots viewed are not shown.
+4. **Privacy Policy wording** is drafted for legal review.
+
+**Built:**
+- **`GET /admin/users/:id/dossier`** (`CustodianUserController`) returns everything about one person, across every TSX (BR-37):
+  - the full party row (credentials stripped by ApiResponse, Aadhaar masked as stored);
+  - every role, active or revoked, with its TSX;
+  - addresses, document metadata and BR-51 consents;
+  - as buyer: bids, offers, EMD holds, Tender interest and eligibility, purchases;
+  - as seller: applications, Lots, sessions, sales, seller messages;
+  - the rating state and every `rating_event`;
+  - disputes, chargebacks, AML flags and payout reviews;
+  - every audit entry they caused or are named in.
+- **BR-16 in the user file:** rows on a live session are withheld and only counted in `hiddenWhileLive`, and so are audit entries about that session.
+- **BR-16 in the Lot file (D-133 corrected):** bidders, offerers, depositors and the current high bidder in a live session are relabelled "Bidder 1, 2, …", and the same masking is applied to its audit entries.
+- **Freeze:**
+  - `POST /admin/users/:id/freeze` and `/unfreeze` require a reason, are logged (`party.frozen` / `party.unfrozen`), and the Custodian account cannot be frozen.
+  - Migration 000075 adds `party.frozen_at`, `frozen_reason` and `frozen_by_party_id`.
+  - `BaseController::refuseIfFrozen()` returns 403 `account_frozen` first thing in: bid, the EMD funding endpoints, offer submit/accept, Express pledge/bid, EMD consent confirm, Lot create, session create, Tender interest/bid.
+  - `KycService::requireVerifiedKyc` refuses too, which covers the Tenant API listing path.
+  - Sign-in, history and settlements are unaffected, and live Lots are not stopped automatically.
+- **Frontend:** `/user-detail` is now the User file (`pages/custodian/CustodianUser.jsx`). The old `UserDetail.jsx` is removed, and Promote to TSX Master is kept.
+  - A Freeze/Unfreeze dialog.
+  - A star-rating chart (`RatingChart.jsx`): a step line per score, validated two-colour palette, Crawl-Back line at 2.0, hover tooltips, with the full event ledger as its table view.
+  - TSX Master decisions are listed from the audit trail.
+- **Privacy:** `docs/drafts/Privacy_Policy_Custodian_oversight.md`, for legal review.
+
+**Verified:**
+- A live bid is hidden from the user file and counted.
+- In the Lot file, live bidders show as "Bidder 1/2".
+- A frozen account gets 403 on bid, offer, pledge, Lot create and EMD consent.
+- Unfreeze restores access; freezing the Custodian is refused.
+- Non-Custodians get 403 on the dossier.
+- The bidding, Express, Buy-Now, cascade, schedule, Tender, lifecycle and KYC suites (133 assertions) all pass.
+
+### D-135: Load speed
+
+**Measured on production** (read-only diagnose run, 22 Oct 2026):
+- Every request to admin.adwitix.com waits about 0.35 s for its first byte. A 5 KB static `favicon.ico` waits the same, so PHP and the database are not the cause.
+- Hostinger's own `x-hcdn-upstream-rt` header reports about 0.25 s from their CDN to the hosting origin.
+- The app runs in production mode with OPcache on.
+- Vercel serves the frontend in 0.03–0.10 s.
+
+**Main fix (project owner, in hPanel):** check the plan's server location and move the hosting to India.
+
+**Built:**
+- **Short caching for public data (`PublicCache` filter):** applies only to anonymous 200 responses with no Authorization header. The tenant list is cached for 300 s and marketplace browse for 30 s. CodeIgniter's default no-store is replaced, and `Vary: Origin, Authorization` is set. Lot detail stays uncached because it records views.
+- **Frontend code splitting:** every route page loads on demand through `lazyPage`, which reloads once if a stale chunk is missing after a deploy. Initial JS went from 873 KB to 328 KB (249 KB to 102 KB gzip) and initial CSS from 226 KB to 28 KB.
+- **Smaller fixes:**
+  - `/assets/*` are served as immutable for one year (vercel.json).
+  - Preconnects to fonts.gstatic.com and admin.adwitix.com.
+  - Real page title and description.
+
+### D-136: KYC review inside the User file; Custodian-only views
+
+**Decision (project owner):**
+- "The custodian does not need to see KYC review separately — it should be sitting within each user detail or data page."
+- "There should be only the custodian view here in the custodian panel" (the Chargeback page had a SaaS Admin / Buyer-Seller toggle).
+
+**Built:**
+- **KYC in the User file:** the file now carries a KYC review panel (`KycReviewPanel.jsx`). It shows status and reason, offers "Mark verified" on each compliance check (PAN, GSTIN, Aadhaar, bank, email), lists document downloads, and has Verify / Suspend with the BR-17 closed-list reason.
+  - Verify and Suspend are offered only for a submitted dossier, as `KycService::reviewDossier` requires.
+  - A banner flags a dossier that is waiting for review.
+- **No separate KYC screen:**
+  - The "KYC Review" menu item and the `KycQueue` page are removed.
+  - `/kyc-queue` now opens the Users list filtered to submitted KYC.
+  - Decision Queue KYC items link into the User file.
+- **Chargeback Handling** shows only the Custodian view, and says "Custodian" where it said "SaaS Admin". It was the only Custodian page with such a toggle.
+
+### D-137: Documents — versioned legal and help pages, managed by the Custodian
+
+**Decision (project owner):** "I want a page where we can check and manage the standard published documents in legal and help pages." All three recommendations were agreed:
+1. A simple formatted editor, not raw HTML.
+2. Pricing left out for now.
+3. The Custodian alone publishes; the lawyer reviews offline.
+
+**Built:**
+- **Storage (migration 000076):**
+  - `legal_document` holds slug, title, kind, category, path, requires_consent and consent_version.
+  - `legal_document_version` keeps every version. Each is a draft, published or superseded, stores its content as JSON, and records effective date, material flag, change note, and who created and published it, and when.
+- **The 11 documents:**
+  - Legal: Terms of Usage, Privacy, Cookies, Refund, Grievance, Dispute Resolution, and the Terms & Privacy summary.
+  - Help: FAQ, Terminology, Do's & Don'ts, Security & Trust.
+  - Version 1 of each is the text the site already showed (`app/Database/Seeds/legal_documents_v1.json`, generated from the pages themselves).
+  - Verified: all 11 public pages render identical text from published v1 and from their built-in text.
+- **`LegalDocumentService`:**
+  - **Schemas:** one per kind (sections, faq, terminology, dosdonts, pillars). The same schema drives the console's form editor and the server-side sanitiser.
+  - **Sanitiser:** keeps p, br, strong/b, em/i, u, ul/ol/li, h3/h4, tables, and links to http(s), mailto, site paths or #anchors only. All other attributes are dropped; scripts, iframes and the like are removed with their content.
+  - **Pre-publish checks:** empty required fields are errors that block publishing. Retired terms (CoCo Starter, SaaS Admin, eBid, General Marketplace as a TSX) and placeholders (TODO, TBD, lorem, `[insert`) are warnings.
+  - **Lifecycle:** draft, publish, discard draft, and restore an old version into a draft. Each step is logged in the audit chain.
+- **BR-51:**
+  - A material publish of a requires_consent document (Terms of Usage, Privacy Policy) sets `consent_version`.
+  - `/auth/me` returns `pendingAcceptances`. The frontend `AcceptanceGate` asks the user to read and accept, and acceptance is recorded as `consent_event` type `document_acceptance` with `terms_version "<slug>@v<n>"`.
+  - `BaseController::refuseIfFrozen()` also returns 403 `acceptance_required` on bid, offer, pledge, listing and session creation until the user accepts.
+  - The Custodian is never asked.
+  - Gap closed: registration consent (BR-51(a)) was never actually recorded, so every existing user is asked to accept the current Terms and Privacy Policy once.
+- **Endpoints:**
+  - Public: `GET /legal/:slug`, cached for 300 s.
+  - Custodian: `/admin/legal` list and detail, plus versions, draft, publish, discard-draft and restore.
+  - User: `POST /me/accept-documents`.
+- **Frontend:**
+  - Public pages read published content through `usePublishedContent`, falling back to the built-in text while loading or if the request fails.
+  - **Custodian → Governance → Documents** has a list with live version, effective date, draft, checks and acceptance counts. Each document has an editor driven by its schema, with formatting buttons, reorderable sections and items, effective date, change note and the material flag.
+  - **Preview** renders the real public page with the draft content.
+  - **Changes vs live** compares field by field.
+  - **History** lets you view, compare and restore any version.
+
+**Found on the live content by the first run of the checks** (left for the project owner to fix through the page):
+- The Terms of Usage §8 says disputes go to "the courts at [city — TODO]".
+- Terminology still says "SaaS Admin" in two places.

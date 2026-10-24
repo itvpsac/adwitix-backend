@@ -343,6 +343,9 @@ class KycService
     // first EMD pledge or first Listing, with no lower-value exemption."
     public function requireVerifiedKyc(string $partyId, string $context): void
     {
+        if (\App\Models\PartyModel::isFrozen($partyId)) {
+            throw new \RuntimeException("This account has been frozen by the Custodian, so it can't be used for {$context}.");
+        }
         $party = $this->partyModel->find($partyId);
         if (!$party || $party['kyc_status'] !== 'verified') {
             throw new \RuntimeException("BR-55: full KYC verification is required before {$context}.");

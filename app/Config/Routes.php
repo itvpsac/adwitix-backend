@@ -112,6 +112,7 @@ $routes->get('/api/v1/app/my-sales', 'MyActivityController::mySales', ['filter' 
 $routes->get('/api/v1/app/my-sales/export', 'MyActivityController::mySalesExport', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-messages', 'MyActivityController::messages', ['filter' => 'jwtAuth']);
 $routes->post('/api/v1/app/my-messages/(:segment)/read', 'MyActivityController::markMessageRead/$1', ['filter' => 'jwtAuth']);
+$routes->get('/api/v1/app/my-seller-tenants', 'TenantController::mySellerTenants', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-star-ratings', 'MyActivityController::starRatings', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-rating-history', 'MyActivityController::ratingHistory', ['filter' => 'jwtAuth']);
 $routes->get('/api/v1/app/my-buyer-dashboard', 'MyActivityController::buyerDashboard', ['filter' => 'jwtAuth']);
@@ -135,10 +136,16 @@ $routes->get('/api/v1/app/admin', 'AdminController::dashboard', ['filter' => 'jw
 $routes->get('/api/v1/app/admin/alerts', 'AdminController::alerts', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/decision-queue', 'AdminController::decisionQueue', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/system-health', 'AdminController::systemHealth', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/listings/(:segment)/dossier', 'AdminController::lotDossier/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/listings/(:segment)/stop', 'AdminController::stopListing/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/sale-events/(:segment)/stop', 'AdminController::stopSaleEvent/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/alerts/server-time-drift/(:segment)/acknowledge', 'AdminController::acknowledgeServerTimeDrift/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/tenants', 'TenantController::list', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants', 'TenantController::createSubmit', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users', 'UserController::index', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/users/(:segment)/dossier', 'CustodianUserController::dossier/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users/(:segment)/freeze', 'CustodianUserController::freeze/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users/(:segment)/unfreeze', 'CustodianUserController::unfreeze/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users/(:segment)', 'UserController::detail/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/users/(:segment)/promote-tenant-admin', 'UserController::promoteTenantAdmin/$1', ['filter' => 'jwtSuperAdmin']);
 
@@ -170,7 +177,7 @@ $routes->get('/browse', 'Home::browse');
 $routes->get('/listings', 'Home::browse');
 // User files (listing media, tenant logos) from persistent storage.
 $routes->get('uploads/(:any)', 'UploadController::serve/$1');
-$routes->get('/api/v1/app/browse', 'Home::browseApi');
+$routes->get('/api/v1/app/browse', 'Home::browseApi', ['filter' => 'publicCache:30']);
 $routes->get('/api/v1/app/admin/audit-log', 'AuditLogController::index', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/audit-log/verify', 'AuditLogController::verifyIntegrity', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/audit-log/export', 'AuditLogController::export', ['filter' => 'jwtSuperAdmin']);
@@ -185,7 +192,19 @@ $routes->post('/api/v1/app/admin/standing-review/(:segment)/rule', 'StandingRevi
 $routes->get('/ticker-feed', 'LiveTickerController::feed');
 $routes->get('/api/v1/app/admin/tenants/(:segment)', 'TenantController::view/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/edit', 'TenantController::editSubmit/$1', ['filter' => 'jwtSuperAdmin']);
-$routes->get('/api/v1/app/tenants', 'TenantController::directory');
+$routes->post('/api/v1/app/admin/tenants/(:segment)/delete', 'TenantController::delete/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/tenants', 'TenantController::directory', ['filter' => 'publicCache:300']);
+// D-137: published legal/help documents, the Custodian's Documents page,
+// and users' acceptance of material changes (BR-51).
+$routes->get('/api/v1/app/legal/(:segment)', 'LegalDocumentController::show/$1', ['filter' => 'publicCache:300']);
+$routes->get('/api/v1/app/admin/legal', 'LegalDocumentController::index', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/legal/(:segment)', 'LegalDocumentController::detail/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/admin/legal/(:segment)/versions/(:num)', 'LegalDocumentController::version/$1/$2', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/draft', 'LegalDocumentController::saveDraft/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/publish', 'LegalDocumentController::publish/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/discard-draft', 'LegalDocumentController::discardDraft/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/legal/(:segment)/restore/(:num)', 'LegalDocumentController::restore/$1/$2', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/me/accept-documents', 'LegalDocumentController::accept', ['filter' => 'jwtAuth']);
 
 // AML Monitoring (BR-54/PR-31) — SaaS Admin only
 $routes->get('/api/v1/app/admin/aml', 'AmlController::index', ['filter' => 'jwtSuperAdmin']);

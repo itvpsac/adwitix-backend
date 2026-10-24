@@ -34,8 +34,8 @@ class TenderService
     public function validateCompanyShopOnly(string $tenantId): void
     {
         $tenant = $this->tenantModel->find($tenantId);
-        if (!$tenant || $tenant['tenant_class'] !== 'company_shop') {
-            throw new \RuntimeException('BR-12: Tender Auction is restricted exclusively to Company Shop tenants.');
+        if (!TenantModel::isSalvageManagers($tenant)) {
+            throw new \RuntimeException('BR-12: Tender Auction is restricted exclusively to the Salvage Managers TradeSphereX (the Company Shop).');
         }
     }
 

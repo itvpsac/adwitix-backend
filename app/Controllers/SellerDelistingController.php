@@ -24,6 +24,10 @@ class SellerDelistingController extends BaseController
         if (!$party) {
             return $this->jsonError(404, 'not_found', 'No registered party found with that mobile number.');
         }
+        // BR-15: the Custodian is never a Market Maker, so there is nothing to delist.
+        if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($party['id'])) {
+            return $this->jsonError(409, 'custodian', 'The Custodian account is not a Market Maker and cannot be delisted.');
+        }
 
         try {
             $result = (new RatingService())->delistSellerForFraud($party['id'], $superAdminId, $reason);

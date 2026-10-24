@@ -67,7 +67,7 @@ class AdminController extends BaseController
             ->get()->getResultArray();
 
         return $this->apiResponse([
-            'tenants' => $tenantModel->findAll(),
+            'tenants' => $tenantModel->salvageManagersFirst()->findAll(),
             'openDisputes' => $disputeModel->whereIn('status', ['filed', 'evidence_window', 'appealed'])->countAllResults(),
             'stalledSettlements' => $settlementModel->where('status', 'stalled')->countAllResults(),
             'openAmlFlags' => $amlFlagModel->where('status', 'open')->countAllResults(),
@@ -146,7 +146,7 @@ class AdminController extends BaseController
         $qOrNull = $q !== '' ? $q : null;
         $total = $svc->countListings($qOrNull, $tenantId, $format, $status);
         $listings = $svc->findListings($qOrNull, $tenantId, $format, $status, $pg['perPage'], $pg['offset']);
-        $tenants = (new TenantModel())->orderBy('name', 'ASC')->findAll();
+        $tenants = (new TenantModel())->salvageManagersFirst()->findAll();
 
         return $this->apiResponse([
             'listings' => $listings, 'tenants' => $tenants,
@@ -168,7 +168,7 @@ class AdminController extends BaseController
         $svc = new \App\Libraries\AdminDirectoryService();
         $total = $svc->countSaleEvents($tenantId, $format, $status);
         $saleEvents = $svc->findSaleEvents($tenantId, $format, $status, $pg['perPage'], $pg['offset']);
-        $tenants = (new TenantModel())->orderBy('name', 'ASC')->findAll();
+        $tenants = (new TenantModel())->salvageManagersFirst()->findAll();
 
         return $this->apiResponse([
             'saleEvents' => $saleEvents, 'tenants' => $tenants,
@@ -183,6 +183,191 @@ class AdminController extends BaseController
     // 'custodian' items are acted on here; 'tsx_master' items (lot and
     // seller approvals, BR-09/BR-13) are shown so the Custodian can see
     // the backlog, but only the tenant's own TSX Master can approve them.
+    // D-132: the Custodian watches Lots and Trading Sessions but never
+    // approves them — that stays with each TSX Master (BR-09/BR-13). What
+    // the Custodian can do is stop any of them, with an audited reason.
+    private const LIVE_SESSION = ['pending_approval', 'grace_period', 'active'];
+
+    // POST /admin/sale-events/:id/stop {reason}: BR-14 emergency stop —
+    // cancels the session, withdraws bids, releases every EMD hold.
+    public function stopSaleEvent(string $saleEventId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for stopping this Trading Session.');
+        }
+        $se = (new \App\Models\SaleEventModel())->find($saleEventId);
+        if (!$se) {
+            return $this->jsonError(404, 'not_found', 'Trading Session not found.');
+        }
+        if (!in_array($se['status'], self::LIVE_SESSION, true)) {
+            return $this->jsonError(409, 'not_live', 'This Trading Session has already ended (' . str_replace('_', ' ', $se['status']) . ').');
+        }
+        try {
+            $saleEvent = (new \App\Libraries\ListingLifecycleService())->emergencyStop($saleEventId, "Custodian: {$reason}", UserAuthContext::partyId());
+        } catch (\RuntimeException $e) {
+            return $this->jsonError(422, 'stop_failed', $e->getMessage());
+        }
+        return $this->apiResponse(['saleEvent' => $saleEvent, 'message' => 'Trading Session stopped; bids withdrawn and deposits released.']);
+    }
+
+    // POST /admin/listings/:id/stop {reason}: stops a Lot — any live
+    // Trading Session on it is emergency-stopped first, then the Lot is
+    // suspended with the reason shown to its seller.
+    public function stopListing(string $listingId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for stopping this Lot.');
+        }
+        $listingModel = new \App\Models\ListingModel();
+        $listing = $listingModel->find($listingId);
+        if (!$listing) {
+            return $this->jsonError(404, 'not_found', 'Lot not found.');
+        }
+        if (in_array($listing['status'], ['sold', 'cycle_ended_unsold', 'suspended'], true)) {
+            return $this->jsonError(409, 'not_live', 'This Lot is already ' . str_replace('_', ' ', $listing['status']) . '.');
+        }
+        $actor = UserAuthContext::partyId();
+        $lifecycle = new \App\Libraries\ListingLifecycleService();
+        $stopped = [];
+        foreach ((new \App\Models\SaleEventModel())->where('listing_id', $listingId)->whereIn('status', self::LIVE_SESSION)->findAll() as $se) {
+            $lifecycle->emergencyStop($se['id'], "Custodian stopped the Lot: {$reason}", $actor);
+            $stopped[] = $se['id'];
+        }
+        $listingModel->update($listingId, ['status' => 'suspended', 'rejection_reason' => "Stopped by the Custodian: {$reason}", 'updated_at' => date('Y-m-d H:i:s')]);
+        (new \App\Libraries\AuditLogService())->log('listing.stopped_by_custodian', $actor, [
+            'listingId' => $listingId, 'reason' => $reason, 'saleEventsStopped' => $stopped,
+        ]);
+        return $this->apiResponse(['listing' => $listingModel->find($listingId), 'saleEventsStopped' => count($stopped),
+            'message' => 'Lot stopped' . ($stopped ? ' and its live Trading Session cancelled.' : '.')]);
+    }
+
+    // GET /admin/listings/:id/dossier (D-133): everything about one Lot for
+    // the Custodian — nothing withheld. The Lot (archived or not) and the
+    // versions it superseded or was superseded by, its seller, TradeSphereX
+    // and TSX Masters, media, every Trading Session with its bids, offers,
+    // deposits, Tender interest, settlement, disputes and chronicle, the
+    // engagement figures, and every audit-chain entry that names it.
+    public function lotDossier(string $listingId)
+    {
+        $db = \Config\Database::connect();
+        $listing = $db->table('listing')->where('id', $listingId)->get()->getRowArray();
+        if (!$listing) {
+            return $this->jsonError(404, 'not_found', 'Lot not found.');
+        }
+        // Whole party rows: the Custodian sees everything. ApiResponse still
+        // strips credential columns (mpin_hash, totp_secret, …).
+        $partyCols = '*';
+        $rows = fn($table, $col, $ids, $order) => $ids ? $db->table($table)->whereIn($col, $ids)->orderBy($order, 'ASC')->get()->getResultArray() : [];
+
+        $sessions = $db->table('sale_event')->where('listing_id', $listingId)->orderBy('created_at', 'ASC')->get()->getResultArray();
+        $seIds = array_column($sessions, 'id');
+        $bids = $rows('bid', 'sale_event_id', $seIds, 'placed_at');
+        $offers = $rows('offer', 'sale_event_id', $seIds, 'created_at');
+        $holds = $rows('emd_hold', 'sale_event_id', $seIds, 'held_at');
+        $interest = $rows('tender_interest', 'sale_event_id', $seIds, 'registered_at');
+        $settlements = $rows('settlement', 'sale_event_id', $seIds, 'created_at');
+        $disputes = $rows('dispute', 'sale_event_id', $seIds, 'created_at');
+        $chronicles = $seIds ? $db->table('trading_session_chronicle')->select('id, sale_event_id, settlement_id, reference_number, version, superseded_by_chronicle_id, generated_at')
+            ->whereIn('sale_event_id', $seIds)->orderBy('generated_at', 'ASC')->get()->getResultArray() : [];
+
+        // BR-16 (kept, D-134): while a session is live the Custodian is blind
+        // to who is bidding — amounts and timings show, bidders read as
+        // "Bidder 1, 2, …" (stable within the session). Names unlock at close.
+        $mask = [];
+        $relabel = function (array &$list, string $col, string $seId, int &$n) use (&$mask) {
+            foreach ($list as &$r) {
+                if ($r['sale_event_id'] === $seId && !empty($r[$col])) {
+                    $mask[$seId][$r[$col]] ??= 'Bidder ' . (++$n);
+                    $r[$col] = $mask[$seId][$r[$col]];
+                }
+            }
+        };
+        foreach ($sessions as &$se) {
+            if (!in_array($se['status'], self::LIVE_SESSION, true)) {
+                continue;
+            }
+            $n = 0;
+            $relabel($bids, 'bidder_party_id', $se['id'], $n);
+            $relabel($offers, 'buyer_party_id', $se['id'], $n);
+            $relabel($holds, 'party_id', $se['id'], $n);
+            $relabel($interest, 'party_id', $se['id'], $n);
+            if (!empty($se['current_high_bidder_party_id'])) {
+                $mask[$se['id']][$se['current_high_bidder_party_id']] ??= 'Bidder ' . (++$n);
+                $se['current_high_bidder_party_id'] = $mask[$se['id']][$se['current_high_bidder_party_id']];
+            }
+            $se['identities_hidden_until_close'] = true;
+        }
+        unset($se);
+
+        $byEvent = fn(array $list) => array_reduce($list, function ($acc, $r) { $acc[$r['sale_event_id']][] = $r; return $acc; }, []);
+        [$bidsBy, $offersBy, $holdsBy, $interestBy, $settleBy, $disputeBy, $chronBy] = array_map($byEvent, [$bids, $offers, $holds, $interest, $settlements, $disputes, $chronicles]);
+        foreach ($sessions as &$se) {
+            $id = $se['id'];
+            $se += ['bids' => $bidsBy[$id] ?? [], 'offers' => $offersBy[$id] ?? [], 'emdHolds' => $holdsBy[$id] ?? [],
+                'tenderInterest' => $interestBy[$id] ?? [], 'settlements' => $settleBy[$id] ?? [], 'disputes' => $disputeBy[$id] ?? [], 'chronicles' => $chronBy[$id] ?? []];
+        }
+        unset($se);
+
+        // Everyone the file mentions, by id, so the page can name them.
+        $partyIds = array_merge([$listing['seller_party_id']],
+            array_column($bids, 'bidder_party_id'), array_column($offers, 'buyer_party_id'), array_column($holds, 'party_id'),
+            array_column($interest, 'party_id'), array_column($settlements, 'buyer_party_id'),
+            array_column($disputes, 'filed_by_party_id'), array_column($disputes, 'respondent_party_id'), array_column($disputes, 'ruled_by_party_id'));
+        if (!empty($listing['inspector_party_id'])) {
+            $partyIds[] = $listing['inspector_party_id'];
+        }
+        $tenant = $db->table('tenant')->select('id, name, tenant_class, subscription_tier, subdomain, custom_domain, suspended_at')->where('id', $listing['tenant_id'])->get()->getRowArray();
+        $masters = $db->table('party_role r')->select('p.id, p.full_name, p.mobile_number')->join('party p', 'p.id = r.party_id')
+            ->where('r.tenant_id', $listing['tenant_id'])->where('r.role', 'tenant_admin')->where('r.revoked_at', null)->get()->getResultArray();
+        $partyIds = array_values(array_unique(array_filter($partyIds)));
+        $parties = $partyIds ? array_column($db->table('party')->select($partyCols)->whereIn('id', $partyIds)->get()->getResultArray(), null, 'id') : [];
+
+        $versions = $db->table('listing')->select('id, title, status, archived_at, superseded_by_listing_id, created_at')
+            ->groupStart()->where('superseded_by_listing_id', $listingId)->orWhere('id', $listing['superseded_by_listing_id'] ?? '')->groupEnd()
+            ->get()->getResultArray();
+
+        $audit = $db->table('audit_log al')->select('al.sequence_number, al.occurred_at, al.event_type, al.actor_party_id, p.full_name AS actor_name, p.mobile_number AS actor_mobile, al.ip_address, al.payload')
+            ->join('party p', 'p.id = al.actor_party_id', 'left')
+            ->groupStart()->like('al.payload', $listingId);
+        foreach ($seIds as $id) {
+            $audit->orLike('al.payload', $id);
+        }
+        $audit = $audit->groupEnd()->orderBy('al.sequence_number', 'ASC')->limit(500)->get()->getResultArray();
+        // …and in the audit trail of a live session, the same masking.
+        foreach ($audit as &$entry) {
+            foreach ($mask as $seId => $labels) {
+                if (str_contains((string) $entry['payload'], $seId)) {
+                    foreach ($labels as $pid => $lbl) {
+                        $entry['payload'] = str_replace($pid, $lbl, (string) $entry['payload']);
+                        if ($entry['actor_party_id'] === $pid) {
+                            $entry['actor_party_id'] = $lbl;
+                            $entry['actor_name'] = $lbl;
+                            $entry['actor_mobile'] = null;
+                            $entry['ip_address'] = null;
+                        }
+                    }
+                }
+            }
+        }
+        unset($entry);
+
+        return $this->apiResponse([
+            'listing' => $listing, 'tenant' => $tenant, 'tsxMasters' => $masters,
+            'seller' => $parties[$listing['seller_party_id']] ?? null, 'parties' => $parties,
+            'media' => $db->table('listing_media')->where('listing_id', $listingId)->get()->getResultArray(),
+            'versions' => $versions, 'sessions' => $sessions,
+            'engagement' => [
+                'views' => $db->table('listing_view')->where('listing_id', $listingId)->countAllResults(),
+                'uniqueViewers' => (int) ($db->query('SELECT COUNT(DISTINCT party_id) AS n FROM listing_view WHERE listing_id = ?', [$listingId])->getRowArray()['n'] ?? 0),
+                'favorites' => $db->table('listing_favorite')->where('listing_id', $listingId)->countAllResults(),
+                'sellerMessages' => $db->table('seller_message')->where('listing_id', $listingId)->orderBy('created_at', 'ASC')->get()->getResultArray(),
+            ],
+            'audit' => $audit,
+        ]);
+    }
+
     public function decisionQueue()
     {
         $db = \Config\Database::connect();

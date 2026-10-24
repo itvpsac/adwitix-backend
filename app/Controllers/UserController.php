@@ -81,7 +81,7 @@ class UserController extends BaseController
         return $this->apiResponse([
             'party' => $party, 'roles' => $roles, 'tenantNames' => $tenantNames,
             'purchases' => $purchases, 'sales' => $sales, 'disputes' => $disputes,
-            'ratingEvents' => $ratingEvents, 'tenants' => (new TenantModel())->findAll(),
+            'ratingEvents' => $ratingEvents, 'tenants' => (new TenantModel())->salvageManagersFirst()->findAll(),
         ]);
     }
 

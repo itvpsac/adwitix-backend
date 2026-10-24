@@ -34,7 +34,7 @@ class PartyModel extends Model
         'deletion_requested_at', 'deletion_reason', 'last_login_at',
         'pan_verified_at', 'gstin_verified_at', 'aadhaar_verified_at', 'email_verified_at', 'bank_verified_at',
         'kyc_verified_by_party_id', 'kyc_submitted_at',
-        'edd_required_at', 'edd_cleared_at', 'edd_cleared_by_party_id',
+        'edd_required_at', 'edd_cleared_at', 'edd_cleared_by_party_id', 'frozen_at', 'frozen_reason', 'frozen_by_party_id',
         'updated_at',
     ];
 
@@ -176,5 +176,12 @@ class PartyModel extends Model
     private function now(): string
     {
         return date('Y-m-d H:i:s');
+    }
+
+    // D-134: frozen by the Custodian (see BaseController::refuseIfFrozen).
+    public static function isFrozen(string $partyId): bool
+    {
+        $row = (new self())->select('frozen_at')->find($partyId);
+        return $row !== null && !empty($row['frozen_at']);
     }
 }
