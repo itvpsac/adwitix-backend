@@ -9169,3 +9169,14 @@ Discussed against the rules first, then confirmed:
   - Each tenant is deleted only if nothing else refers to it, and the deletion is audited as `tenant.deleted` with reason "Sample tenant — not real". Salvage Managers is then the only TradeSphereX.
 - **BR-45 (master document v4, in both repos):** "a minimum of 5 seller-uploaded photographs, and no more than the per-Lot photo limit of its TradeSphereX's subscription plan (Section 6.5)". The fixed 50 is gone, matching what D-138 enforces.
 - **Diagnose workflow:** now also reports the server's location (public IP lookup) and a round-trip time to an Indian host, to inform the hosting-location decision.
+
+**Deploy note (24 Oct 2026):**
+- The first deploy of D-140 to D-143 (itvpsac/adwitix-backend#30) stopped safely at migration 079 with "Illegal mix of collations". The site stayed on its previous release, and migration 078 had already applied.
+- **Cause:**
+  - On the live database, tables created with a plain `CREATE TABLE` took the database's default collation, `utf8mb4_unicode_ci`. The app's own tables use `utf8mb4_general_ci`.
+  - Publishing a document joins its history to `party`, which fails across the two collations.
+  - The same join made the Custodian's Documents history view fail on the live site.
+- **Fix:**
+  - Migration 079 now converts every table to `party`'s collation first, dropping and restoring any foreign keys that block the change.
+  - The failure was reproduced on a production-like copy and the fix verified there before deploying.
+  - The second deploy (itvpsac/adwitix-backend#31) ran 079 to 081 cleanly; the health check returned 200.
