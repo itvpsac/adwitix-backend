@@ -9133,3 +9133,15 @@ Discussed against the rules first, then confirmed:
   - A green **Reactivate Lot** button whose confirmation says where the Lot will go.
   - When reactivation isn't allowed, a banner says why.
   - The "Last rejection" banner reads "Suspended" for suspended Lots.
+
+### D-142: Terms of Usage §8.1 — courts at New Delhi, India
+
+**Decision (project owner):** the city for the Terms §8 courts clause is "New Delhi, India".
+
+- §8.1 now reads: "…subject to the exclusive jurisdiction of the courts at New Delhi, India."
+- **Publishing:**
+  - It is published as Terms of Usage version 2 through the Documents service (migration 080), acting as the Custodian and audited.
+  - The change is **non-material**: filling in a placeholder doesn't change what users agreed to, so `consent_version` is unchanged and nobody is asked to accept again.
+  - The migration does nothing if a draft is in progress or the placeholder is already gone.
+- **Fallback text:** the page's built-in fallback text (`TermsOfUsage.jsx`) is updated to match.
+- **For the legal adviser:** the clause is upheld only if New Delhi courts otherwise have jurisdiction, for example because the registered office or the business is there. Consumers keep their statutory right to approach a Consumer Commission where they live.
