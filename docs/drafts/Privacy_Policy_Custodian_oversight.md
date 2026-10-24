@@ -53,6 +53,15 @@ or live Trading Session, giving a reason that is shown to the seller.
 - **Deposits** held for it are released.
 - **Record:** the stop is recorded in the audit trail.
 
+5.6A. **Putting a Lot on hold.** If a Lot is unclear, misleading, uses
+stock or catalogue photos, is not allowed on the Platform, or contains
+objectionable content, the Custodian may put it on hold with a reason.
+The Custodian does not edit your Lot (BR-15).
+- **While on hold:** the Lot cannot be approved, scheduled or sold, and any live Trading Session on it is stopped with bids withdrawn and deposits released.
+- **No deadline:** the Lot stays on hold until you correct it and the Custodian lifts the hold; your TSX Master then approves it again (BR-13).
+- **Stock photos:** using stock, catalogue or generated photos without an approved media waiver is recorded as a Certified-by-Seller violation on your seller record (BR-59, BR-61).
+- **Record:** every hold, correction and decision is recorded in the audit trail, and you may request a review through the Grievance Redressal process.
+
 5.7. **Star Ratings are not edited by hand.** Ratings change only through
 the recorded rating events described in our Star Ratings policy, with the
 approvals that policy requires.

@@ -138,6 +138,14 @@ $routes->get('/api/v1/app/admin/decision-queue', 'AdminController::decisionQueue
 $routes->get('/api/v1/app/admin/system-health', 'AdminController::systemHealth', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/listings/(:segment)/dossier', 'AdminController::lotDossier/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/listings/(:segment)/stop', 'AdminController::stopListing/$1', ['filter' => 'jwtSuperAdmin']);
+// D-140: Custodian objections to a Lot, and the seller's side of them.
+$routes->post('/api/v1/app/admin/listings/(:segment)/objections', 'ListingObjectionController::raise/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/objections/(:segment)/review', 'ListingObjectionController::review/$1', ['filter' => 'jwtSuperAdmin']);
+$routes->get('/api/v1/app/me/lots-on-hold', 'ListingObjectionController::mine', ['filter' => 'jwtAuth']);
+$routes->post('/api/v1/app/objections/(:segment)/acknowledge', 'ListingObjectionController::acknowledge/$1', ['filter' => 'jwtAuth']);
+$routes->post('/api/v1/app/objections/(:segment)/submit-fix', 'ListingObjectionController::submitFix/$1', ['filter' => 'jwtAuth']);
+$routes->post('/api/v1/app/listings/(:segment)/correct', 'ListingObjectionController::correct/$1', ['filter' => 'jwtAuth']);
+$routes->post('/api/v1/app/listings/(:segment)/media/(:segment)/remove', 'ListingObjectionController::removeMedia/$1/$2', ['filter' => 'jwtAuth']);
 $routes->post('/api/v1/app/admin/sale-events/(:segment)/stop', 'AdminController::stopSaleEvent/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/alerts/server-time-drift/(:segment)/acknowledge', 'AdminController::acknowledgeServerTimeDrift/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/tenants', 'TenantController::list', ['filter' => 'jwtSuperAdmin']);

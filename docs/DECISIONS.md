@@ -9062,3 +9062,51 @@ Discussed against the rules first, then confirmed:
   - Changing a KYC-verified identity field (name, date of birth, PAN, GSTIN) keeps the KYC status but is flagged in the audit entry, and the form warns the Custodian first.
   - A new mobile must be OTP-verified again at the next sign-in.
   - The Custodian account is not editable here.
+
+### D-140: Custodian objections — a Lot goes on hold until the seller fixes it
+
+**Decision (project owner):** the Custodian raises an objection rather than editing a Lot ("Yes as per BR"). The Lot is paused while the objection is open. There is no time limit, because "the things are stopped till rectified — however ensure they know and understand this". A stock-photo objection counts as a violation straight away, "unless there is media waiver".
+
+**Rules applied:**
+- **BR-15:** the Custodian never acts as seller or TSX Master, so it cannot edit a seller's Lot.
+- **BR-13:** content belongs to the seller, and approval belongs to the TSX Master.
+- **BR-14:** stopping a live session is an emergency stop, so bids are withdrawn and deposits released.
+- **BR-59, BR-60, BR-61:** stock or catalogue photos are a CBS violation unless an active media waiver covers the category, and each violation feeds the seller's Standing Review.
+
+**What was built:**
+- **Migration 078:** a new Lot status `on_hold`, and a `listing_objection` table that records:
+  - reason and note;
+  - status: open, fix_submitted, resolved or withdrawn;
+  - the Lot's status before the hold, and the sessions stopped;
+  - the CBS offence number or the waiver that applied;
+  - when the seller acknowledged;
+  - the fix note, the Custodian's review note, and how many times the fix was sent back.
+- **Raising an objection:**
+  - The Custodian picks from a fixed list of reasons: unclear description, misleading, stock images, insufficient media, wrong category, prohibited item, objectionable content, other. A note is required, and the seller sees it.
+  - Raising it stops any live sessions and puts the Lot on hold. On hold, it can't be approved, scheduled, bid on or submitted, and it disappears from browse.
+  - For stock images, a CBS violation is recorded unless an active waiver applies.
+  - The seller and TSX Master are emailed where an address exists. Delivery is best effort, because SMTP isn't configured yet.
+- **Making sure the seller knows:**
+  - After sign-in, a notice the seller cannot dismiss explains, for each held Lot:
+    - it can't be sold;
+    - there is no deadline;
+    - what to fix;
+    - what happens next;
+    - any CBS violation recorded.
+  - The seller must tick "I understand", and that acknowledgement is recorded.
+  - A banner also appears on the seller dashboard and on the Lot page. The public sees "on hold" with the reason only.
+- **The seller's fix** (`/fix-lot`):
+  - Lot details are corrected in place. This is allowed because the Lot is on hold, so no bidder relies on the old text, and every change is audited with its old and new value.
+  - The seller can add media, remove media and set the main photo. Removed files stay on disk as evidence. If the main photo is removed, the next photo becomes the main one.
+  - The seller submits the fix with a note.
+- **Custodian review:**
+  - A submitted fix appears in the Decision Queue.
+  - In the Lot file the Custodian can lift the hold, send it back with a note, or withdraw the objection (a note is required).
+  - When the hold is lifted, the Lot goes to `pending_approval` for the TSX Master, or back to the seller's inventory if it had never been submitted.
+  - If the Lot was stopped or suspended in the meantime, it stays as it is.
+- **Seller suspension and fraud delisting** now cover held Lots too.
+
+**Also done in this round:**
+- **Terminology:** "Custodian (SaaS Admin)" is now "Custodian", published as version 2 through the Documents service (migration 079), and in the page's built-in fallback text.
+- **Not done:** the Terms §8 city is still waiting for the project owner's choice.
+- **Privacy draft:** a new section 5.6A covers Lot holds.

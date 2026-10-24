@@ -358,6 +358,8 @@ class AdminController extends BaseController
             'seller' => $parties[$listing['seller_party_id']] ?? null, 'parties' => $parties,
             'media' => $db->table('listing_media')->where('listing_id', $listingId)->get()->getResultArray(),
             'versions' => $versions, 'sessions' => $sessions,
+            'objections' => (new \App\Libraries\ListingObjectionService())->forListing($listingId),
+            'objectionReasons' => array_map(fn($r) => $r[0], \App\Libraries\ListingObjectionService::REASONS),
             'engagement' => [
                 'views' => $db->table('listing_view')->where('listing_id', $listingId)->countAllResults(),
                 'uniqueViewers' => (int) ($db->query('SELECT COUNT(DISTINCT party_id) AS n FROM listing_view WHERE listing_id = ?', [$listingId])->getRowArray()['n'] ?? 0),
@@ -428,8 +430,15 @@ class AdminController extends BaseController
             $add('seller', $r['id'], $who($r), 'Wants to sell on ' . $r['tenant_name'] . ' · waiting on its TSX Master', $r['applied_at'], 'tsx_master');
         }
 
+        // D-140: a seller has corrected a Lot the Custodian put on hold.
+        foreach ($db->table('listing_objection o')->select('o.id, o.listing_id, o.reason_key, o.fix_submitted_at, l.title, l.category, t.name AS tenant_name')
+            ->join('listing l', 'l.id = o.listing_id')->join('tenant t', 't.id = o.tenant_id')->where('o.status', 'fix_submitted')->get()->getResultArray() as $r) {
+            $add('objection', $r['id'], ($r['title'] ?: $r['category']) . ' · fix to review', \App\Libraries\ListingObjectionService::reasonLabel($r['reason_key']) . ' · ' . $r['tenant_name'],
+                $r['fix_submitted_at'], 'custodian', ['listingId' => $r['listing_id']]);
+        }
+
         // Oldest first; a few rules mark items overdue on top of their own flags.
-        $limits = ['kyc' => 2, 'aml' => 2, 'payout' => 2, 'rating' => 3, 'waiver' => 5, 'chargeback' => 3, 'lot' => 3, 'seller' => 3, 'dispute' => 7];
+        $limits = ['objection' => 2, 'kyc' => 2, 'aml' => 2, 'payout' => 2, 'rating' => 3, 'waiver' => 5, 'chargeback' => 3, 'lot' => 3, 'seller' => 3, 'dispute' => 7];
         foreach ($items as &$it) {
             $age = $it['since'] ? (time() - strtotime($it['since'])) / 86400 : 0;
             $it['overdue'] = ($it['overdue'] ?? false) || $age > ($limits[$it['type']] ?? 3);

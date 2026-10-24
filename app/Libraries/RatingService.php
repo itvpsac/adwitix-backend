@@ -463,7 +463,7 @@ class RatingService
         $db = \Config\Database::connect();
         $activeListings = $db->table('listing')
             ->where('seller_party_id', $partyId)
-            ->whereIn('status', ['inventory', 'pending_approval', 'upcoming', 'active'])
+            ->whereIn('status', ['inventory', 'pending_approval', 'upcoming', 'active', 'on_hold'])
             ->get()->getResultArray();
 
         $listingModel = new \App\Models\ListingModel();

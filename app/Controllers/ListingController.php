@@ -335,7 +335,13 @@ class ListingController extends BaseController
             'missingMediaCount' => $missingMediaCount,
             // Mirrors MediaService::enqueueUploads()'s own checks.
             'canAddMedia' => $viewerId !== null && $viewerId === $listing['seller_party_id']
-                && in_array($listing['status'], ['inventory', 'pending_approval'], true),
+                && in_array($listing['status'], ['inventory', 'pending_approval', 'on_hold'], true),
+            // D-140: an open Custodian objection — the seller and TSX Master
+            // see it in full; everyone else sees only that the Lot is on hold.
+            'objection' => ($objection = (new \App\Libraries\ListingObjectionService())->openFor($listingId))
+                ? (($viewerId === $listing['seller_party_id'] || $isTenantAdminForListing) ? $objection
+                    : ['status' => $objection['status'], 'reason_label' => $objection['reason_label']])
+                : null,
             'canFlagCbsViolation' => $isTenantAdminForListing,
             'isTenantAdminForListing' => $isTenantAdminForListing,
             'minPhotos' => \App\Libraries\MediaService::minPhotos(),
