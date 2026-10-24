@@ -174,4 +174,139 @@ class CustodianUserController extends BaseController
         return $this->apiResponse(['party' => $model->find($partyId),
             'message' => $freeze ? 'Account frozen. It can no longer bid, offer, pledge or sell.' : 'Account unfrozen.']);
     }
+
+    // ── Adding and correcting users (the Custodian's own tools) ──────
+
+    // Fields the Custodian may correct, and how each is checked.
+    private const EDITABLE = [
+        'full_name' => 'name', 'mobile_number' => 'mobile', 'recovery_email' => 'email',
+        'date_of_birth' => 'date', 'occupation' => 'text', 'pan' => 'pan', 'org_gstin' => 'gstin',
+    ];
+    // Fields KYC verified against documents — a change to these is flagged
+    // in the audit entry.
+    private const IDENTITY = ['full_name', 'date_of_birth', 'pan', 'org_gstin'];
+
+    // POST /admin/users {mobile_number, full_name, recovery_email?, entity_type?}
+    // Adds an account the way registration would (Trader role, KYC pending).
+    // The person signs in with an OTP to that mobile, which verifies it, and
+    // accepts the Terms and Privacy Policy themselves on first sign-in
+    // (BR-51) — the Custodian can't consent for them.
+    public function create()
+    {
+        try {
+            $mobile = $this->clean('mobile_number', 'mobile', $this->input('mobile_number'));
+            $name = $this->clean('full_name', 'name', $this->input('full_name'));
+            $email = $this->clean('recovery_email', 'email', $this->input('recovery_email'));
+        } catch (\RuntimeException $e) {
+            return $this->jsonError(422, 'invalid', $e->getMessage());
+        }
+        $entity = $this->input('entity_type') === 'organization' ? 'organization' : 'individual';
+        $model = new PartyModel();
+        if ($existing = $model->findByMobile($mobile)) {
+            return $this->jsonError(409, 'exists', "{$mobile} already belongs to " . ($existing['full_name'] ?: 'an account') . ' — open them from the directory.');
+        }
+        $party = $model->createParty($mobile, $entity);
+        $model->update($party['id'], ['full_name' => $name, 'recovery_email' => $email]);
+        (new \App\Models\PartyRoleModel())->grantRole($party['id'], 'buyer');
+        (new \App\Libraries\AuditLogService())->log('party.created_by_custodian', UserAuthContext::partyId(), [
+            'partyId' => $party['id'], 'mobile' => $mobile, 'name' => $name, 'entityType' => $entity,
+        ]);
+        return $this->apiResponse(['party' => $model->find($party['id']), 'message' => "{$name} added. They sign in with an OTP to {$mobile}."], null, 201);
+    }
+
+    // POST /admin/users/:id/edit {field: value, …, reason}
+    public function edit(string $partyId)
+    {
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') {
+            return $this->jsonError(422, 'reason_required', 'Give a reason for the correction.');
+        }
+        $model = new PartyModel();
+        $party = $model->find($partyId);
+        if (!$party) {
+            return $this->jsonError(404, 'not_found', 'User not found.');
+        }
+        if ((new \App\Libraries\AuthorizationService())->isSuperAdmin($partyId)) {
+            return $this->jsonError(409, 'custodian', "The Custodian account isn't edited here.");
+        }
+        $changes = [];
+        try {
+            foreach (self::EDITABLE as $field => $kind) {
+                $raw = $this->input($field);
+                if ($raw === null) {
+                    continue;
+                }
+                $v = $this->clean($field, $kind, $raw);
+                if ((string) ($party[$field] ?? '') !== (string) ($v ?? '')) {
+                    $changes[$field] = ['from' => $party[$field] ?? null, 'to' => $v];
+                }
+            }
+        } catch (\RuntimeException $e) {
+            return $this->jsonError(422, 'invalid', $e->getMessage());
+        }
+        if (!$changes) {
+            return $this->jsonError(409, 'no_change', 'Nothing was changed.');
+        }
+        if (isset($changes['mobile_number']) && ($other = $model->findByMobile($changes['mobile_number']['to'])) && $other['id'] !== $partyId) {
+            return $this->jsonError(409, 'mobile_taken', "{$changes['mobile_number']['to']} already belongs to another account.");
+        }
+        $update = array_map(fn($c) => $c['to'], $changes);
+        if (isset($changes['mobile_number'])) {
+            $update['mobile_verified_at'] = null; // proved again at their next OTP sign-in
+        }
+        $model->update($partyId, $update + ['updated_at' => date('Y-m-d H:i:s')]);
+        $identity = array_values(array_intersect(array_keys($changes), self::IDENTITY));
+        (new \App\Libraries\AuditLogService())->log('party.corrected_by_custodian', UserAuthContext::partyId(), [
+            'partyId' => $partyId, 'reason' => $reason, 'changes' => $changes,
+            'kycVerifiedIdentityChanged' => ($party['kyc_status'] ?? null) === 'verified' && $identity ? $identity : [],
+        ]);
+        return $this->apiResponse(['party' => $model->find($partyId), 'message' => 'Details corrected.']);
+    }
+
+    private function clean(string $field, string $kind, $raw): ?string
+    {
+        $v = trim(strip_tags((string) $raw));
+        $label = ['full_name' => 'Name', 'mobile_number' => 'Mobile number', 'recovery_email' => 'Email', 'date_of_birth' => 'Date of birth',
+            'occupation' => 'Occupation', 'pan' => 'PAN', 'org_gstin' => 'GSTIN'][$field] ?? $field;
+        if ($v === '') {
+            if (in_array($kind, ['name', 'mobile'], true)) {
+                throw new \RuntimeException("{$label} is required.");
+            }
+            return null;
+        }
+        switch ($kind) {
+            case 'mobile':
+                $digits = preg_replace('/\D/', '', $v);
+                $v = '+91' . substr($digits, -10);
+                if (strlen($digits) < 10 || !\App\Libraries\AuthService::isValidIndianMobile($v)) {
+                    throw new \RuntimeException('Mobile number must be a 10-digit Indian mobile number.');
+                }
+                return $v;
+            case 'email':
+                if (!filter_var($v, FILTER_VALIDATE_EMAIL)) {
+                    throw new \RuntimeException('Email is not a valid email address.');
+                }
+                return strtolower($v);
+            case 'date':
+                $d = \DateTime::createFromFormat('Y-m-d', $v);
+                if (!$d || $d->format('Y-m-d') !== $v || $d > new \DateTime()) {
+                    throw new \RuntimeException('Date of birth must be a past date (YYYY-MM-DD).');
+                }
+                return $v;
+            case 'pan':
+                $v = strtoupper($v);
+                if (!preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]$/', $v)) {
+                    throw new \RuntimeException('PAN must look like ABCDE1234F.');
+                }
+                return $v;
+            case 'gstin':
+                $v = strtoupper($v);
+                if (!preg_match('/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/', $v)) {
+                    throw new \RuntimeException('GSTIN must be 15 characters, like 27ABCDE1234F1Z5.');
+                }
+                return $v;
+            default:
+                return mb_substr($v, 0, $kind === 'name' ? 120 : 200);
+        }
+    }
 }

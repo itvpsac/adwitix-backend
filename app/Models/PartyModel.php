@@ -54,6 +54,14 @@ class PartyModel extends Model
     }
 
     // BR-02: registration creates the party record before mPIN is set
+    // Account standing as the Custodian sees it, most serious first.
+    public static function standing(array $p): string
+    {
+        return !empty($p['frozen_at']) ? 'frozen'
+            : (!empty($p['seller_delisted_at']) ? 'delisted'
+            : ((!empty($p['shadow_banned_at_buyer']) || !empty($p['shadow_banned_at_seller'])) ? 'shadow_banned' : 'active'));
+    }
+
     public function createParty(string $mobileNumber, string $entityType = 'individual'): array
     {
         $id = \App\Libraries\Uuid::v4();

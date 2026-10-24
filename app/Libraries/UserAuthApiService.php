@@ -108,6 +108,8 @@ class UserAuthApiService
                 'full_name' => $fullName,
                 'recovery_email' => $email !== '' ? $email : $party['recovery_email'],
                 'last_login_at' => date('Y-m-d H:i:s'),
+                // An account the Custodian added: the OTP just proved the number.
+                'mobile_verified_at' => $party['mobile_verified_at'] ?: date('Y-m-d H:i:s'),
             ]);
         } else {
             $party = $this->partyModel->createParty($mobileNumber, $profile['entity_type'] ?? 'individual');

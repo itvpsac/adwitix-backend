@@ -9039,3 +9039,26 @@ Discussed against the rules first, then confirmed:
   - **TradeSphereX page:** a storage meter, the largest Lot against each per-Lot limit, and an "Extra storage bought (GB)" field.
   - **Pricing page:** the storage and retention table is built from `GET /plans`. If the request fails, it falls back to the built-in values.
   - **Create Lot:** shows the chosen TSX's photo, video and file limits.
+
+### D-139: User Directory — true standing, no Custodian account, add and correct users
+
+**Decision (project owner):** "There is no facility to add users from here - none to rectify any details of the users from here. Even the frozen accounts show active here." And: "why does it show super admin account here?"
+
+- **Standing:**
+  - The directory status comes from the server (`PartyModel::standing`). The order, most serious first, is Frozen, Delisted, Shadow-banned, Active.
+  - A frozen account (D-135) now shows **Frozen**. Before this fix it showed Active.
+- **Filters:** status, type and KYC now filter on the server across every page. Before, they filtered only the page on screen.
+- **The Custodian's own account** (any party holding an active `super_admin` role) is left out of the directory. It is not a platform user and never trades.
+- **Add user** (`POST /admin/users`):
+  - Takes mobile, name, optional email, and Individual or Business.
+  - Creates the account the way registration does: Trader role, KYC pending, mobile not yet verified.
+  - The person verifies the mobile by signing in with an OTP. They accept the Terms and Privacy Policy themselves on first sign-in (BR-51); the Custodian cannot consent for them. They complete KYC themselves.
+  - A duplicate mobile gets a 409 naming the existing account.
+  - Audited as `party.created_by_custodian`.
+- **Edit details** (`POST /admin/users/:id/edit`), from the user file:
+  - Fields: name, mobile, email, date of birth, occupation, PAN, and GSTIN (for businesses).
+  - Every field is validated, and a reason is required.
+  - Audited as `party.corrected_by_custodian`, with the old and new value of each field.
+  - Changing a KYC-verified identity field (name, date of birth, PAN, GSTIN) keeps the KYC status but is flagged in the audit entry, and the form warns the Custodian first.
+  - A new mobile must be OTP-verified again at the next sign-in.
+  - The Custodian account is not editable here.
