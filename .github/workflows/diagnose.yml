@@ -1,5 +1,5 @@
-# Read-only server check, run by hand from the Actions tab. Uses the same
-# secrets as deploy.yml; changes nothing on the server.
+# Server check, run by hand from the Actions tab. Uses the same secrets as
+# deploy.yml. Read-only, except the opt-in rotate_db_password job below.
 name: Diagnose server
 
 on:
@@ -12,6 +12,10 @@ on:
         description: Frontend origin used for the proxied URLs
         required: false
         default: https://adwitix.vercel.app
+      rotate_db_password:
+        description: Give the app's database user a new random password (type "rotate" to do it)
+        required: false
+        default: ''
 
 jobs:
   diagnose:
@@ -147,3 +151,104 @@ jobs:
           FROM tenant t ORDER BY t.name;
           SQL
           REMOTE
+
+  # Opt-in (rotate_db_password = "rotate"): the old password is in the
+  # repository's history, so it is replaced. The new one is generated on the
+  # server, set on the database user, and written only to the shared server
+  # .env — never printed, never leaves the server. The site is checked with
+  # it; on any failure the old password and .env are put back.
+  rotate-db-password:
+    if: inputs.rotate_db_password == 'rotate'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ] && break
+            echo "ssh-keyscan attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not reach the server's SSH port"; exit 1; }
+
+      - name: Rotate the database password
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" DEPLOY_PATH="$DEPLOY_PATH" bash -s <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          BASE=$(dirname "$(dirname "$DEPLOY_PATH")")
+          ENVF="$BASE/adwitix-shared/.env"
+          [ -f "$ENVF" ] || { echo "::error::No shared .env at adwitix-shared/.env — nothing changed"; exit 1; }
+          PHP=""
+          for bin in /opt/alt/php84/usr/bin/php /opt/alt/php83/usr/bin/php /usr/bin/php php; do
+            if "$bin" -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' 2>/dev/null; then PHP="$bin"; break; fi
+          done
+          cd "$DEPLOY_PATH"
+          work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+
+          # The connection exactly as the app resolves it today.
+          DBNAME=$("$PHP" spark backup:mysql-config "$work/old.cnf" | tail -1)
+          mysql --defaults-extra-file="$work/old.cnf" "$DBNAME" -e 'SELECT 1' >/dev/null 2>&1 || { echo "::error::The current connection does not work — nothing changed"; exit 1; }
+          OLD=$(sed -n 's/^password="\(.*\)"$/\1/p' "$work/old.cnf" | sed 's/\\\(.\)/\1/g')
+          # The old password as an SQL string literal (backslashes and quotes escaped).
+          OLD_SQL=$(printf '%s' "$OLD" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
+          NEW=$(openssl rand -hex 24)
+          cp -p "$ENVF" "$work/env.bak"
+
+          # Change the password (SQL goes in on stdin, never on a command line).
+          if ! mysql --defaults-extra-file="$work/old.cnf" 2>"$work/err1" <<SQL
+          ALTER USER CURRENT_USER() IDENTIFIED BY '$NEW';
+          SQL
+          then
+            if ! mysql --defaults-extra-file="$work/old.cnf" 2>"$work/err2" <<SQL
+          SET PASSWORD = PASSWORD('$NEW');
+          SQL
+            then
+              echo "::warning::The host does not let the database user change its own password — nothing was changed. Change it in hPanel instead."
+              grep -ho 'ERROR [0-9]* ([0-9A-Z]*)' "$work/err1" "$work/err2" | sed 's/^/  /' || true
+              exit 0
+            fi
+          fi
+          echo "Database user's password changed."
+
+          put_back() {
+            echo "::error::$1 — putting the old password back"
+            printf '[client]\nhost=localhost\nuser=%s\npassword="%s"\n' "$(sed -n 's/^user="\(.*\)"$/\1/p' "$work/old.cnf")" "$NEW" > "$work/new-direct.cnf"
+            mysql --defaults-extra-file="$work/new-direct.cnf" >/dev/null 2>&1 <<SQL || mysql --defaults-extra-file="$work/new-direct.cnf" >/dev/null 2>&1 <<SQL2 || echo "::error::Could not put the old password back — change it in hPanel and set database.default.password in adwitix-shared/.env"
+          ALTER USER CURRENT_USER() IDENTIFIED BY '$OLD_SQL';
+          SQL
+          SET PASSWORD = PASSWORD('$OLD_SQL');
+          SQL2
+            cat "$work/env.bak" > "$ENVF"
+            "$PHP" spark cache:clear >/dev/null 2>&1 || true
+            exit 1
+          }
+
+          # Write it to the shared .env only (any earlier line replaced).
+          grep -v -E '^[[:space:]]*database\.default\.password[[:space:]]*=' "$work/env.bak" > "$work/env.new" || true
+          printf '\n# Rotated %s (diagnose.yml rotate_db_password)\ndatabase.default.password = %s\n' "$(date -u +%Y-%m-%dT%H:%MZ)" "$NEW" >> "$work/env.new"
+          cat "$work/env.new" > "$ENVF"
+          "$PHP" spark cache:clear >/dev/null 2>&1 || true
+
+          # Check: the app now resolves the new password, and connects with it.
+          "$PHP" spark backup:mysql-config "$work/new.cnf" >/dev/null || put_back "The app could not read its settings"
+          [ "$(sed -n 's/^password="\(.*\)"$/\1/p' "$work/new.cnf")" = "$NEW" ] || put_back "The app does not pick up the new password from .env"
+          mysql --defaults-extra-file="$work/new.cnf" "$DBNAME" -e 'SELECT COUNT(*) FROM tenant' >/dev/null 2>&1 || put_back "The app cannot connect with the new password"
+          mysql --defaults-extra-file="$work/old.cnf" "$DBNAME" -e 'SELECT 1' >/dev/null 2>&1 && put_back "The old password still works"
+          code=$(curl -s --max-time 20 -o /dev/null -w '%{http_code}' "https://admin.adwitix.com/public/index.php/api/v1/app/listings/rotation-check-$RANDOM" || true)
+          echo "Site check (a missing Lot, so the database is queried): HTTP $code"
+          [ "$code" = 404 ] || put_back "The site did not answer as expected (HTTP $code)"
+          echo "Done: new password set and in use; the old one no longer works. It is stored only in adwitix-shared/.env."
+          REMOTE
+
