@@ -9004,3 +9004,61 @@ Discussed against the rules first, then confirmed:
 **Found on the live content by the first run of the checks** (left for the project owner to fix through the page):
 - The Terms of Usage §8 says disputes go to "the courts at [city — TODO]".
 - Terminology still says "SaaS Admin" in two places.
+
+### D-138: TSX plan limits as data, enforced; Custodian Plans sheet
+
+**Decision (project owner):** "start enforcing the storage and photo limits per plan and other dynamic factors per each TSX type subscriptions. make a helper page also - comparison sheet". Every plan-dependent rule now reads one table, `subscription_plan`, so the Custodian can change a plan on a page and the platform behaves differently at once, with no code change.
+
+- **The table:** migration 077. It has one row per plan: Salvage Managers (`coco_starter`), TSX Launch, TSX Growth and TSX Enterprise.
+  - Each row holds price, API access, Seller-Pays, TSX Masters, staff roles and SSO.
+  - It holds the media and storage limits.
+  - It holds retention, purge, backup and restore.
+  - A NULL limit means unlimited.
+  - The seed values are the ones the Pricing page already published (§6.5).
+- **`tenant.extra_storage_gb`:** records storage a TSX has bought on top of its plan. The rate is ₹2,000 per 100 GB a year.
+- **Enforced** (`PlanService`):
+  - **On upload** (`MediaService::enqueueUploads`), each file is checked before anything is staged:
+    - photos, videos and documents per Lot, counting existing and still-queued media;
+    - the plan's largest-file limit, which never exceeds the platform caps of 8 MB a photo, 20 MB a PDF and 500 MB a video;
+    - the TSX's total storage, measured as the sum of its Lots' stored media against the plan allowance plus extra storage.
+    - A refusal names the limit it hit.
+  - **API access (BR-66):** `TenantModel::hasApiAccess`, `canPushListings` and `canPushSaleEvents` read `api_access` (none, read, read + push Lots, or full).
+  - **Seller-Pays (BR-32):** read from `seller_pays_allowed`, in both the portal and the TSX API.
+- **Policy, not yet automated:** retention, purge, backups, restore, staff roles and SSO. The sheet labels these rows "Policy".
+- **BR-11:** the fixed 50-photo maximum is replaced by the plan limit (TSX Launch 100, TSX Growth 300, the others unlimited). The 5-photo minimum is unchanged.
+  - BR-11's text in the master document still says 5–50 and should be updated to "at least 5, up to the plan's limit".
+- **Lowering a limit** never removes media already uploaded. It only blocks new uploads above the limit.
+- **Endpoints:**
+  - `GET /plans` is public and cached for 300 s.
+  - `GET /admin/plans` returns the plans, the enforced fields and the number of TSXs on each plan.
+  - `POST /admin/plans/:key` validates each field and writes a `subscription_plan.updated` audit entry with the from/to of every changed field.
+  - `GET /admin/tenants/:id` now includes `planUsage`.
+  - Tenant edit accepts `extra_storage_gb`.
+- **Frontend:**
+  - **Custodian → Governance → Plans** is a comparison sheet. It shows the plans side by side, grouped rows with Enforced/Policy badges, TSX counts per plan, the date each plan was last changed, a print layout, and an edit mode. Saving confirms how many TSXs the change affects.
+  - **TradeSphereX page:** a storage meter, the largest Lot against each per-Lot limit, and an "Extra storage bought (GB)" field.
+  - **Pricing page:** the storage and retention table is built from `GET /plans`. If the request fails, it falls back to the built-in values.
+  - **Create Lot:** shows the chosen TSX's photo, video and file limits.
+
+### D-139: User Directory — true standing, no Custodian account, add and correct users
+
+**Decision (project owner):** "There is no facility to add users from here - none to rectify any details of the users from here. Even the frozen accounts show active here." And: "why does it show super admin account here?"
+
+- **Standing:**
+  - The directory status comes from the server (`PartyModel::standing`). The order, most serious first, is Frozen, Delisted, Shadow-banned, Active.
+  - A frozen account (D-135) now shows **Frozen**. Before this fix it showed Active.
+- **Filters:** status, type and KYC now filter on the server across every page. Before, they filtered only the page on screen.
+- **The Custodian's own account** (any party holding an active `super_admin` role) is left out of the directory. It is not a platform user and never trades.
+- **Add user** (`POST /admin/users`):
+  - Takes mobile, name, optional email, and Individual or Business.
+  - Creates the account the way registration does: Trader role, KYC pending, mobile not yet verified.
+  - The person verifies the mobile by signing in with an OTP. They accept the Terms and Privacy Policy themselves on first sign-in (BR-51); the Custodian cannot consent for them. They complete KYC themselves.
+  - A duplicate mobile gets a 409 naming the existing account.
+  - Audited as `party.created_by_custodian`.
+- **Edit details** (`POST /admin/users/:id/edit`), from the user file:
+  - Fields: name, mobile, email, date of birth, occupation, PAN, and GSTIN (for businesses).
+  - Every field is validated, and a reason is required.
+  - Audited as `party.corrected_by_custodian`, with the old and new value of each field.
+  - Changing a KYC-verified identity field (name, date of birth, PAN, GSTIN) keeps the KYC status but is flagged in the audit entry, and the form warns the Custodian first.
+  - A new mobile must be OTP-verified again at the next sign-in.
+  - The Custodian account is not editable here.

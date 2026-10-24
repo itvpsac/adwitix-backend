@@ -30,7 +30,6 @@ use App\Models\MediaUploadJobModel;
 class MediaService
 {
     private const MIN_PHOTOS = 5;
-    private const MAX_PHOTOS = 50;
     private const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
     private const ALLOWED_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
     private const ALLOWED_DOCUMENT_MIME_TYPES = ['application/pdf'];
@@ -65,18 +64,35 @@ class MediaService
 
         $validFiles = array_filter($files, fn($f) => $f->isValid() && !$f->hasMoved());
 
-        // BR-11's 5-50 count applies to PHOTOS specifically — video and
-        // documents are optional and separate, never counted against
-        // this cap. Counts both already-processed photos AND
-        // still-queued photo jobs, so a seller can't race past the cap
-        // by uploading faster than the queue drains.
-        $existingPhotoCount = $this->mediaModel->countForListing($listingId, 'photo')
-            + $this->jobModel->countPendingOrProcessingForListing($listingId, self::ALLOWED_IMAGE_MIME_TYPES);
-        $newPhotoCount = count(array_filter($validFiles, fn($f) => in_array($f->getMimeType(), self::ALLOWED_IMAGE_MIME_TYPES, true)));
-        if ($existingPhotoCount + $newPhotoCount > self::MAX_PHOTOS) {
-            throw new \RuntimeException(
-                "BR-11 violation: maximum " . self::MAX_PHOTOS . " photos per listing (already have/queued {$existingPhotoCount}, tried to add {$newPhotoCount})"
-            );
+        // Per-Lot counts and storage come from the TSX's plan (D-138,
+        // §6.5; BR-11's 5-photo minimum still applies at submit). Counts
+        // include still-queued jobs, so a seller can't race past a cap by
+        // uploading faster than the queue drains. Every file is checked
+        // before any is staged, so a refused batch leaves nothing behind.
+        $kindOf = function ($f): ?string {
+            $m = $f->getMimeType();
+            return in_array($m, self::ALLOWED_IMAGE_MIME_TYPES, true) ? 'photo'
+                : (in_array($m, self::ALLOWED_VIDEO_MIME_TYPES, true) ? 'video'
+                : (in_array($m, self::ALLOWED_DOCUMENT_MIME_TYPES, true) ? 'document' : null));
+        };
+        $mimes = ['photo' => self::ALLOWED_IMAGE_MIME_TYPES, 'video' => self::ALLOWED_VIDEO_MIME_TYPES, 'document' => self::ALLOWED_DOCUMENT_MIME_TYPES];
+        $already = $incoming = ['photo' => 0, 'video' => 0, 'document' => 0];
+        $sizes = [];
+        foreach ($validFiles as $file) {
+            $kind = $kindOf($file);
+            if ($kind === null) {
+                throw new \RuntimeException("Unsupported file type: {$file->getMimeType()} (JPEG/PNG/WebP for photos, MP4/MOV/WebM for video, PDF for documents)");
+            }
+            $incoming[$kind]++;
+            $sizes[] = [$file->getClientName(), (int) $file->getSize(), $kind];
+        }
+        foreach ($mimes as $kind => $types) {
+            $already[$kind] = $this->mediaModel->countForListing($listingId, $kind)
+                + $this->jobModel->countPendingOrProcessingForListing($listingId, $types);
+        }
+        $tenant = (new \App\Models\TenantModel())->find($listing['tenant_id']);
+        if ($tenant) {
+            PlanService::assertUploadAllowed($tenant, $already, $incoming, $sizes);
         }
 
         // Staged OUTSIDE the public webroot — these are raw, unprocessed
@@ -91,14 +107,11 @@ class MediaService
         $jobs = [];
         foreach ($validFiles as $file) {
             $mimeType = $file->getMimeType();
-            $isImage = in_array($mimeType, self::ALLOWED_IMAGE_MIME_TYPES, true);
             $isVideo = in_array($mimeType, self::ALLOWED_VIDEO_MIME_TYPES, true);
             $isDocument = in_array($mimeType, self::ALLOWED_DOCUMENT_MIME_TYPES, true);
 
-            if (!$isImage && !$isVideo && !$isDocument) {
-                throw new \RuntimeException("Unsupported file type: {$mimeType} (JPEG/PNG/WebP for photos, MP4/MOV/WebM for video, PDF for documents)");
-            }
-
+            // Platform caps per file type; the plan's own per-file limit
+            // (checked above) can be lower, never higher.
             $sizeCapKb = $isVideo ? self::MAX_VIDEO_SIZE_KB : ($isDocument ? self::MAX_DOCUMENT_SIZE_KB : self::MAX_FILE_SIZE_KB);
             if ($file->getSize() / 1024 > $sizeCapKb) {
                 throw new \RuntimeException("File too large: {$file->getName()} (max {$sizeCapKb}KB before compression)");
@@ -235,10 +248,5 @@ class MediaService
     public static function minPhotos(): int
     {
         return self::MIN_PHOTOS;
-    }
-
-    public static function maxPhotos(): int
-    {
-        return self::MAX_PHOTOS;
     }
 }

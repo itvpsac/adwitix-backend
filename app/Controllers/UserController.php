@@ -15,7 +15,29 @@ class UserController extends BaseController
         $partyModel = new PartyModel();
         $q = trim((string) $this->request->getGet('q'));
 
-        $builder = $partyModel->where('archived_at', null)->orderBy('mobile_number', 'ASC');
+        // The Custodian's own account isn't a platform user — it never trades,
+        // so it stays out of the directory.
+        $builder = $partyModel->where('archived_at', null)
+            ->where("id NOT IN (SELECT party_id FROM party_role WHERE role = 'super_admin' AND revoked_at IS NULL)", null, false)
+            ->orderBy('mobile_number', 'ASC');
+        // Filters run here, across every page: ?status (active, frozen,
+        // delisted, shadow_banned), ?type (individual, organization), ?kyc.
+        match ((string) $this->request->getGet('status')) {
+            'frozen' => $builder->where('frozen_at IS NOT NULL', null, false),
+            'delisted' => $builder->where('frozen_at', null)->where('seller_delisted_at IS NOT NULL', null, false),
+            'shadow_banned' => $builder->where('frozen_at', null)->where('seller_delisted_at', null)
+                ->groupStart()->where('shadow_banned_at_buyer IS NOT NULL', null, false)->orWhere('shadow_banned_at_seller IS NOT NULL', null, false)->groupEnd(),
+            'active' => $builder->where('frozen_at', null)->where('seller_delisted_at', null)->where('shadow_banned_at_buyer', null)->where('shadow_banned_at_seller', null),
+            default => null,
+        };
+        $type = (string) $this->request->getGet('type');
+        if (in_array($type, ['individual', 'organization'], true)) {
+            $builder->where('entity_type', $type);
+        }
+        $kyc = (string) $this->request->getGet('kyc');
+        if ($kyc !== '' && $kyc !== 'all') {
+            $kyc === 'pending' ? $builder->groupStart()->where('kyc_status', 'pending')->orWhere('kyc_status', null)->groupEnd() : $builder->where('kyc_status', $kyc);
+        }
         if ($q !== '') {
             $builder = $builder->groupStart()
                 ->like('mobile_number', $q)
@@ -28,7 +50,7 @@ class UserController extends BaseController
         $perPage = max(1, min(100, (int) ($this->request->getGet('per_page') ?: 100)));
         $page = max(1, (int) ($this->request->getGet('page') ?: 1));
         $total = $builder->countAllResults(false);
-        $users = $builder->findAll($perPage, ($page - 1) * $perPage);
+        $users = array_map(fn($u) => $u + ['status' => PartyModel::standing($u)], $builder->findAll($perPage, ($page - 1) * $perPage));
 
         return $this->apiResponse([
             'users' => $users, 'q' => $q,

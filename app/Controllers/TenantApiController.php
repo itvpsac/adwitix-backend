@@ -282,8 +282,8 @@ class TenantApiController extends BaseController
 
         // BR-31/32 (D-87/D-88): Fee Payer Election, same tier gate as the portal.
         $feePayer = ($body['feePayer'] ?? 'buyer_pays') === 'seller_pays' ? 'seller_pays' : 'buyer_pays';
-        if ($feePayer === 'seller_pays' && $tenant['subscription_tier'] === 'coco_starter') {
-            return $this->apiResponse(['error' => 'forbidden', 'error_description' => 'BR-32: Seller-Pays is not available on a CoCo Starter TSX.'], null, 403);
+        if ($feePayer === 'seller_pays' && !\App\Libraries\PlanService::sellerPaysAllowed($tenant['subscription_tier'])) {
+            return $this->apiResponse(['error' => 'forbidden', 'error_description' => 'BR-32: Seller-Pays is not included in this TSX\'s plan.'], null, 403);
         }
         $data['fee_payer'] = $feePayer;
 

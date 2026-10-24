@@ -143,6 +143,8 @@ $routes->post('/api/v1/app/admin/alerts/server-time-drift/(:segment)/acknowledge
 $routes->get('/api/v1/app/admin/tenants', 'TenantController::list', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants', 'TenantController::createSubmit', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users', 'UserController::index', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users', 'CustodianUserController::create', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/users/(:segment)/edit', 'CustodianUserController::edit/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/admin/users/(:segment)/dossier', 'CustodianUserController::dossier/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/users/(:segment)/freeze', 'CustodianUserController::freeze/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/users/(:segment)/unfreeze', 'CustodianUserController::unfreeze/$1', ['filter' => 'jwtSuperAdmin']);
@@ -194,6 +196,10 @@ $routes->get('/api/v1/app/admin/tenants/(:segment)', 'TenantController::view/$1'
 $routes->post('/api/v1/app/admin/tenants/(:segment)/edit', 'TenantController::editSubmit/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->post('/api/v1/app/admin/tenants/(:segment)/delete', 'TenantController::delete/$1', ['filter' => 'jwtSuperAdmin']);
 $routes->get('/api/v1/app/tenants', 'TenantController::directory', ['filter' => 'publicCache:300']);
+// D-138: TSX subscription plans (public comparison + the Custodian's Plans sheet).
+$routes->get('/api/v1/app/plans', 'PlanController::index', ['filter' => 'publicCache:300']);
+$routes->get('/api/v1/app/admin/plans', 'PlanController::adminIndex', ['filter' => 'jwtSuperAdmin']);
+$routes->post('/api/v1/app/admin/plans/(:segment)', 'PlanController::update/$1', ['filter' => 'jwtSuperAdmin']);
 // D-137: published legal/help documents, the Custodian's Documents page,
 // and users' acceptance of material changes (BR-51).
 $routes->get('/api/v1/app/legal/(:segment)', 'LegalDocumentController::show/$1', ['filter' => 'publicCache:300']);

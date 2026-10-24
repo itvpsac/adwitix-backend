@@ -130,10 +130,15 @@ jobs:
           done
           cnf=$(mktemp); trap 'rm -f "$cnf"' EXIT
           db=$("$PHP" "$DEPLOY_PATH/spark" backup:mysql-config "$cnf" | tail -1)
+          echo "== Deploy processes still running"; ps -u "$(id -un)" -o pid,etime,args 2>/dev/null | grep -E "spark|composer|mysqldump|backup.sh|tar " | grep -v grep || echo "none"
+          echo "== Latest releases"; ls -1t "$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-releases" | head -3; echo "live -> $(readlink "$DEPLOY_PATH")"
+          echo "== Latest backups"; ls -lt "$(dirname "$(dirname "$DEPLOY_PATH")")/adwitix-backups" 2>/dev/null | head -4
           echo "== App mode (non-secret settings)"; grep -E '^\s*(CI_ENVIRONMENT|app\.baseURL|toolbar|logger\.threshold)' "$DEPLOY_PATH/.env" || echo "CI_ENVIRONMENT not set in .env (defaults to production)"
           echo "debugbar files: $(ls "$DEPLOY_PATH/writable/debugbar" 2>/dev/null | wc -l)"; echo "log size: $(du -sh "$DEPLOY_PATH/writable/logs" 2>/dev/null | cut -f1)"
           "$PHP" -r 'echo "CLI opcache.enable=", ini_get("opcache.enable"), "\n";'
           mysql --defaults-extra-file="$cnf" -t "$db" <<'SQL'
+          SELECT version, time FROM migrations ORDER BY id DESC LIMIT 4;
+          SELECT id, user, time, state, LEFT(info, 120) AS query FROM information_schema.processlist WHERE command <> 'Sleep' ORDER BY time DESC LIMIT 8;
           SELECT t.id, t.name, t.tenant_class, t.subscription_tier, t.subdomain, t.suspended_at,
                  (SELECT COUNT(*) FROM listing l WHERE l.tenant_id = t.id) AS lots,
                  (SELECT COUNT(*) FROM listing l WHERE l.tenant_id = t.id AND l.archived_at IS NULL) AS live_lots,
